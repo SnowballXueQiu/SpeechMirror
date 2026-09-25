@@ -11,8 +11,13 @@ import 'package:record/record.dart';
 
 import '../auth_controller.dart';
 import '../models.dart';
+import '../pending_training_store.dart';
 import '../theme.dart';
 import '../widgets.dart';
+
+final pendingTrainingStoreProvider = Provider<PendingTrainingStore>(
+  (ref) => FilePendingTrainingStore(),
+);
 
 class TrainingScreen extends ConsumerStatefulWidget {
   const TrainingScreen({super.key, required this.projectId});
@@ -23,10 +28,11 @@ class TrainingScreen extends ConsumerStatefulWidget {
 }
 
 class _TrainingScreenState extends ConsumerState<TrainingScreen> {
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  AudioRecorder? _audioRecorder;
   CameraController? _camera;
   Project? _project;
   RehearsalSession? _session;
+  PendingTraining? _pendingTraining;
   Timer? _timer;
   int _elapsedSeconds = 0;
   bool _initializing = true;
@@ -46,9 +52,35 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
 
   Future<void> _initialize() async {
     try {
+      final pendingStore = ref.read(pendingTrainingStoreProvider);
+      final pending = await pendingStore.load(widget.projectId);
       final project = await ref
           .read(apiClientProvider)
           .getProject(widget.projectId);
+      if (pending != null) {
+        if (!await pendingStore.mediaExists(pending)) {
+          throw StateError('待恢复训练记录引用的本地音视频不完整，请保留文件并重新检查。');
+        }
+        if (!mounted) return;
+        setState(() {
+          _project = project;
+          _session = RehearsalSession(
+            id: pending.sessionId,
+            projectId: pending.projectId,
+            title: '待恢复训练',
+            status: 'pending_analysis',
+            targetSeconds: project.durationSeconds,
+            actualSeconds: pending.actualSeconds,
+            transcript: pending.transcript,
+          );
+          _pendingTraining = pending;
+          _audioPath = pending.audioPath;
+          _videoPath = pending.videoPath;
+          _elapsedSeconds = pending.actualSeconds;
+          _initializing = false;
+        });
+        return;
+      }
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
         throw CameraException('cameraUnavailable', '未检测到可用摄像头');
@@ -92,7 +124,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       _processing = true;
     });
     try {
-      if (!await _audioRecorder.hasPermission()) {
+      final audioRecorder = _audioRecorder ??= AudioRecorder();
+      if (!await audioRecorder.hasPermission()) {
         throw StateError('需要麦克风权限才能生成真实转写和训练报告');
       }
       final session = await ref
@@ -104,7 +137,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       final audioPath = '${audioDirectory.path}/${session.id}.m4a';
       await camera.startVideoRecording();
       try {
-        await _audioRecorder.start(
+        await audioRecorder.start(
           const RecordConfig(encoder: AudioEncoder.aacLc),
           path: audioPath,
         );
@@ -152,14 +185,29 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       _processError = null;
     });
     try {
-      await _audioRecorder.stop();
+      final stoppedAudioPath = await _audioRecorder!.stop();
       final captured = await _camera!.stopVideoRecording();
       final directory = await getApplicationDocumentsDirectory();
       final videoDirectory = Directory('${directory.path}/speechmirror/video');
       await videoDirectory.create(recursive: true);
       final destination = '${videoDirectory.path}/${_session!.id}.mp4';
       await File(captured.path).copy(destination);
-      if (mounted) setState(() => _videoPath = destination);
+      final pending = PendingTraining(
+        projectId: widget.projectId,
+        sessionId: _session!.id,
+        audioPath: stoppedAudioPath ?? _audioPath!,
+        videoPath: destination,
+        actualSeconds: _elapsedSeconds.clamp(1, 3600),
+        savedAt: DateTime.now(),
+      );
+      await ref.read(pendingTrainingStoreProvider).save(pending);
+      if (mounted) {
+        setState(() {
+          _pendingTraining = pending;
+          _audioPath = pending.audioPath;
+          _videoPath = pending.videoPath;
+        });
+      }
       await _submitForAnalysis();
     } catch (error) {
       if (mounted) {
@@ -172,27 +220,44 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   }
 
   Future<void> _submitForAnalysis() async {
-    final audioPath = _audioPath;
-    final session = _session;
-    if (audioPath == null || session == null) return;
+    var pending = _pendingTraining;
+    if (pending == null) return;
     setState(() {
       _processing = true;
       _processError = null;
     });
     try {
+      if (!await ref.read(pendingTrainingStoreProvider).mediaExists(pending)) {
+        throw StateError('本地音视频文件不完整，已停止提交以避免丢失恢复线索');
+      }
       final api = ref.read(apiClientProvider);
-      final transcript = await api.uploadAudio(session.id, audioPath);
+      var transcript = pending.transcript;
+      if (transcript == null || transcript.trim().isEmpty) {
+        transcript = await api.uploadAudio(
+          pending.sessionId,
+          pending.audioPath,
+        );
+        pending = pending.withTranscript(transcript);
+        await ref.read(pendingTrainingStoreProvider).save(pending);
+        if (mounted) setState(() => _pendingTraining = pending);
+      }
       await api.completeSession(
-        session.id,
-        _elapsedSeconds.clamp(1, 3600),
+        pending.sessionId,
+        pending.actualSeconds,
         transcript,
       );
-      await api.analyzeSession(session.id);
-      if (mounted) context.go('/reports/${session.id}');
+      await api.analyzeSession(pending.sessionId);
+      await ref.read(pendingTrainingStoreProvider).delete(widget.projectId);
+      final audio = File(pending.audioPath);
+      if (await audio.exists()) await audio.delete();
+      if (mounted) {
+        setState(() => _pendingTraining = null);
+        context.go('/reports/${pending.sessionId}');
+      }
     } catch (error) {
       if (mounted) {
         setState(() {
-          _processError = '本地视频未上传，音频分析失败：$error';
+          _processError = '本地视频未上传，待恢复记录已保留：$error';
           _processing = false;
         });
       }
@@ -203,128 +268,180 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   void dispose() {
     _timer?.cancel();
     _camera?.dispose();
-    _audioRecorder.dispose();
+    _audioRecorder?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final project = _project;
-    return Scaffold(
-      appBar: AppBar(title: const Text('模拟答辩')),
-      body: _initializing
-          ? const Center(child: CircularProgressIndicator())
-          : _setupError != null
-          ? _SetupError(
-              message: _setupError!,
-              onRetry: () {
-                setState(() {
-                  _initializing = true;
-                  _setupError = null;
-                });
-                _initialize();
-              },
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-              children: [
-                PageIntro(
-                  eyebrow: _recording
-                      ? 'RECORDING / LOCAL ONLY'
-                      : 'PRIVATE REHEARSAL',
-                  title: project?.name ?? '模拟答辩',
-                  description: '视频仅保存在本机；服务端只接收音频用于语音识别。',
-                ),
-                const SizedBox(height: 22),
-                _CameraStage(
-                  controller: _camera!,
-                  recording: _recording,
-                  overtime: _deadlineSignaled,
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _TimeBlock(
-                        label: '当前',
-                        value: _clock(_elapsedSeconds),
-                        accent: _deadlineSignaled,
+    return PopScope(
+      canPop: !_recording && !_processing,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_recording ? '请先结束当前录制' : '正在保存训练记录，请稍候')),
+        );
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('模拟答辩')),
+        body: _initializing
+            ? const Center(child: CircularProgressIndicator())
+            : _setupError != null
+            ? _SetupError(
+                message: _setupError!,
+                onRetry: () {
+                  setState(() {
+                    _initializing = true;
+                    _setupError = null;
+                  });
+                  _initialize();
+                },
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+                children: [
+                  PageIntro(
+                    eyebrow: _recording
+                        ? 'RECORDING / LOCAL ONLY'
+                        : 'PRIVATE REHEARSAL',
+                    title: project?.name ?? '模拟答辩',
+                    description: '视频仅保存在本机；服务端只接收音频用于语音识别。',
+                  ),
+                  const SizedBox(height: 22),
+                  if (_pendingTraining != null)
+                    _PendingTrainingStage(training: _pendingTraining!)
+                  else
+                    _CameraStage(
+                      controller: _camera!,
+                      recording: _recording,
+                      overtime: _deadlineSignaled,
+                    ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _TimeBlock(
+                          label: '当前',
+                          value: _clock(_elapsedSeconds),
+                          accent: _deadlineSignaled,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _TimeBlock(
+                          label: '目标',
+                          value: _clock(project?.durationSeconds ?? 0),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  if (_processError != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.white,
+                        border: Border.all(color: AppColors.vermilion),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _processError!,
+                        style: const TextStyle(color: AppColors.vermilion),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _TimeBlock(
-                        label: '目标',
-                        value: _clock(project?.durationSeconds ?? 0),
-                      ),
-                    ),
+                    const SizedBox(height: 12),
                   ],
-                ),
-                const SizedBox(height: 18),
-                if (_processError != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      border: Border.all(color: AppColors.vermilion),
-                      borderRadius: BorderRadius.circular(6),
+                  if (_videoPath != null) ...[
+                    Text(
+                      '本地视频：$_videoPath',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 12,
+                      ),
                     ),
-                    child: Text(
-                      _processError!,
-                      style: const TextStyle(color: AppColors.vermilion),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                if (_videoPath != null) ...[
-                  Text(
-                    '本地视频：$_videoPath',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.muted,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                if (_session != null && !_recording && _processError != null)
-                  FilledButton.icon(
-                    onPressed: _processing ? null : _submitForAnalysis,
-                    icon: const Icon(Icons.sync),
-                    label: const Text('重试音频分析'),
-                  )
-                else
-                  FilledButton.icon(
-                    onPressed: _processing
-                        ? null
-                        : (_recording ? _stop : _start),
-                    icon: _processing
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+                    const SizedBox(height: 12),
+                  ],
+                  if (_pendingTraining != null && !_recording)
+                    FilledButton.icon(
+                      onPressed: _processing ? null : _submitForAnalysis,
+                      icon: const Icon(Icons.sync),
+                      label: Text(_processError == null ? '继续生成报告' : '重试音频分析'),
+                    )
+                  else
+                    FilledButton.icon(
+                      onPressed: _processing
+                          ? null
+                          : (_recording ? _stop : _start),
+                      icon: _processing
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Icon(
+                              _recording
+                                  ? Icons.stop_circle_outlined
+                                  : Icons.fiber_manual_record,
                             ),
-                          )
-                        : Icon(
-                            _recording
-                                ? Icons.stop_circle_outlined
-                                : Icons.fiber_manual_record,
-                          ),
-                    label: Text(
-                      _processing ? '正在处理' : (_recording ? '结束并生成报告' : '开始录制'),
+                      label: Text(
+                        _processing
+                            ? '正在处理'
+                            : (_recording ? '结束并生成报告' : '开始录制'),
+                      ),
                     ),
-                  ),
-                const SizedBox(height: 20),
-                const _PrivacyNote(),
-              ],
-            ),
+                  const SizedBox(height: 20),
+                  const _PrivacyNote(),
+                ],
+              ),
+      ),
     );
   }
 
   String _clock(int seconds) =>
       '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
+}
+
+class _PendingTrainingStage extends StatelessWidget {
+  const _PendingTrainingStage({required this.training});
+
+  final PendingTraining training;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('pending-training-stage'),
+    constraints: const BoxConstraints(minHeight: 280),
+    padding: const EdgeInsets.all(24),
+    decoration: BoxDecoration(
+      color: AppColors.ink,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.video_file_outlined, size: 48, color: Colors.white),
+        const SizedBox(height: 16),
+        const Text(
+          '本地录制待分析',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 21,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '已保留 ${training.actualSeconds} 秒视频与音频，恢复网络后可继续提交。',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white70, height: 1.5),
+        ),
+      ],
+    ),
+  );
 }
 
 class _CameraStage extends StatelessWidget {
