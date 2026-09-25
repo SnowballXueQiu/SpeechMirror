@@ -2,6 +2,15 @@
 
 本目录只保存已完成的真实调试证据，不记录待验证结论，不包含测试账号、密码或接口密钥。
 
+## 2026-09-26 iOS 公网 Debug 包与界面回归
+
+- 环境：Flutter 3.35.5、Xcode 26.2、iOS 26.2 模拟器 `SpeechMirror QA`，Debug 包直连公网 VPS。
+- 流程：真实登录、创建项目、材料进入知识库、DeepSeek 生成问题、提交文字回答、返回评价和连续追问，并在冷启动后恢复登录状态。
+- 构建隔离：仅 Debug 使用独立 ATS 明文 HTTP 放行；Release 与 Profile 未放行任意 HTTP。
+- 产物：Simulator Debug ZIP 和 iPhoneOS Debug 未签名 ZIP 均已生成并记录 SHA-256。
+- 验证边界：模拟器无摄像头，训练页明确返回 `cameraUnavailable`；iPhoneOS 包需用户在 Xcode 中配置 Team 后签名安装。
+- 完整记录：[iOS 公网 Debug 包与界面回归](ios-vps-debug-package.md)。
+
 ## 2026-09-26 AI 评委回答与连续追问闭环
 
 - 数据边界：文本回答和 10.9985 秒中文语音均为合成测试数据，不代表真人回答。
