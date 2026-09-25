@@ -7,6 +7,8 @@
 - [x] 推送仓库基线到 GitHub `main` 分支。
 - [x] 使用 Xcode/iOS Simulator 构建并启动 Flutter 登录页，确认 Xcode Debugger 已附加。
 - [x] 安装 Flutter 87.1 与 Dart 251.25410.28 插件，使用 Android Studio Debug 在 `SpeechMirror_QA` 模拟器启动登录页并保存截图。
+- [x] 完成注册、登录、令牌刷新、退出撤销与移动端安全存储闭环。
+- [x] 完成项目创建、读取、编辑、永久删除及返回列表刷新，并在 Android Studio 与 Xcode 中实测。
 - [ ] 安装 DevEco Studio 和 HarmonyOS 6 SDK，完成 SDK License 与模拟器配置。
 - [ ] 用 DevEco Studio 导入 `apps/harmony`，修正 SDK 版本与签名配置，生成第一个 HAP。
 

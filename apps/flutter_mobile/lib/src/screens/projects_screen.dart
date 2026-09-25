@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../auth_controller.dart';
 import '../models.dart';
+import '../project_editor.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -83,7 +84,7 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
                 Card(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
-                    onTap: () => context.push('/projects/${project.id}'),
+                    onTap: () => _openProject(project.id),
                     child: Padding(
                       padding: const EdgeInsets.all(18),
                       child: Row(
@@ -150,83 +151,23 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
   );
 
   Future<void> _createProject() async {
-    final name = TextEditingController();
-    final description = TextEditingController();
-    var minutes = 5;
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('新建答辩项目'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: name,
-                  decoration: const InputDecoration(labelText: '项目名称'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: description,
-                  maxLines: 3,
-                  decoration: const InputDecoration(labelText: '一句话说明'),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    const Text('目标时长'),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: minutes > 1
-                          ? () => setDialogState(() => minutes--)
-                          : null,
-                      icon: const Icon(Icons.remove),
-                    ),
-                    Text(
-                      '$minutes 分钟',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    IconButton(
-                      onPressed: minutes < 30
-                          ? () => setDialogState(() => minutes++)
-                          : null,
-                      icon: const Icon(Icons.add),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('创建'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (accepted != true || name.text.trim().isEmpty) return;
+    final draft = await showProjectEditor(context);
+    if (draft == null) return;
     try {
       final project = await ref
           .read(apiClientProvider)
-          .createProject(
-            name.text,
-            description.text.trim().isEmpty ? null : description.text.trim(),
-            minutes * 60,
-          );
+          .createProject(draft.name, draft.description, draft.durationSeconds);
       if (!mounted) return;
       _reload();
-      context.push('/projects/${project.id}');
+      await _openProject(project.id);
     } catch (error) {
       if (mounted) showError(context, error);
     }
+  }
+
+  Future<void> _openProject(String projectId) async {
+    await context.push<void>('/projects/$projectId');
+    if (mounted) _reload();
   }
 }
 

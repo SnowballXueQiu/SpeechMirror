@@ -102,7 +102,7 @@ async fn openapi_spec() -> impl IntoResponse {
 mod tests {
     use axum::{
         body::Body,
-        http::{Request, StatusCode},
+        http::{Method, Request, StatusCode},
     };
     use http_body_util::BodyExt;
     use serde_json::{Value, json};
@@ -320,9 +320,154 @@ mod tests {
         assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
     }
 
+    #[tokio::test]
+    async fn project_crud_normalizes_fields_and_enforces_ownership() {
+        let temp = tempdir().unwrap();
+        let router = app(Config::test(temp.path().to_owned())).await.unwrap();
+
+        let owner = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"project_owner","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        let owner: Value =
+            serde_json::from_slice(&owner.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        let owner_token = owner["access_token"].as_str().unwrap();
+
+        let intruder = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"project_intruder","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        let intruder: Value =
+            serde_json::from_slice(&intruder.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let intruder_token = intruder["access_token"].as_str().unwrap();
+
+        let created = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/projects",
+                json!({
+                    "name":"  论文答辩  ",
+                    "description":"  多端协同训练  ",
+                    "defense_duration_seconds":300
+                }),
+                Some(owner_token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::OK);
+        let created: Value =
+            serde_json::from_slice(&created.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(created["name"], "论文答辩");
+        assert_eq!(created["description"], "多端协同训练");
+        let project_id = created["id"].as_str().unwrap();
+
+        let denied = router
+            .clone()
+            .oneshot(json_request_with_method(
+                Method::PUT,
+                &format!("/api/v1/projects/{project_id}"),
+                json!({"name":"非法修改"}),
+                Some(intruder_token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+
+        let oversized = router
+            .clone()
+            .oneshot(json_request_with_method(
+                Method::PUT,
+                &format!("/api/v1/projects/{project_id}"),
+                json!({"description":"x".repeat(501)}),
+                Some(owner_token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(oversized.status(), StatusCode::BAD_REQUEST);
+
+        let updated = router
+            .clone()
+            .oneshot(json_request_with_method(
+                Method::PUT,
+                &format!("/api/v1/projects/{project_id}"),
+                json!({
+                    "name":"  更新后项目  ",
+                    "description":"   ",
+                    "defense_duration_seconds":420
+                }),
+                Some(owner_token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(updated.status(), StatusCode::OK);
+        let updated: Value =
+            serde_json::from_slice(&updated.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(updated["name"], "更新后项目");
+        assert!(updated["description"].is_null());
+        assert_eq!(updated["defense_duration_seconds"], 420);
+
+        let denied_delete = router
+            .clone()
+            .oneshot(json_request_with_method(
+                Method::DELETE,
+                &format!("/api/v1/projects/{project_id}"),
+                json!({}),
+                Some(intruder_token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied_delete.status(), StatusCode::NOT_FOUND);
+
+        let deleted = router
+            .clone()
+            .oneshot(json_request_with_method(
+                Method::DELETE,
+                &format!("/api/v1/projects/{project_id}"),
+                json!({}),
+                Some(owner_token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(deleted.status(), StatusCode::OK);
+
+        let missing = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/projects/{project_id}"))
+                    .header("authorization", format!("Bearer {owner_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    }
+
     fn json_request(uri: &str, body: Value, token: Option<&str>) -> Request<Body> {
+        json_request_with_method(Method::POST, uri, body, token)
+    }
+
+    fn json_request_with_method(
+        method: Method,
+        uri: &str,
+        body: Value,
+        token: Option<&str>,
+    ) -> Request<Body> {
         let mut builder = Request::builder()
-            .method("POST")
+            .method(method)
             .uri(uri)
             .header("content-type", "application/json");
         if let Some(token) = token {

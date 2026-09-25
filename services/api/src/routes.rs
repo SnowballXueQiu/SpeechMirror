@@ -22,8 +22,8 @@ use crate::{
         verify_password,
     },
     entities::{
-        document, jury_answer, jury_question, project, refresh_token, rehearsal_session, report,
-        session_metric, user,
+        analysis_job, document, jury_answer, jury_question, project, refresh_token,
+        rehearsal_session, report, session_metric, user,
     },
     error::{ApiError, ApiResult},
     models::*,
@@ -185,12 +185,16 @@ async fn create_project(
             "defense duration must be 60-1800 seconds".into(),
         ));
     }
+    let description = match body.description {
+        Some(description) => normalize_project_description(description)?,
+        None => None,
+    };
     let now = Utc::now();
     let model = project::ActiveModel {
         id: Set(Uuid::new_v4().to_string()),
         user_id: Set(user.id),
         name: Set(name.into()),
-        description: Set(body.description),
+        description: Set(description),
         defense_duration_seconds: Set(body.defense_duration_seconds),
         created_at: Set(now),
         updated_at: Set(now),
@@ -248,7 +252,7 @@ async fn update_project(
         active.defense_duration_seconds = Set(seconds);
     }
     if let Some(description) = body.description {
-        active.description = Set((!description.trim().is_empty()).then_some(description));
+        active.description = Set(normalize_project_description(description)?);
     }
     active.updated_at = Set(Utc::now());
     Ok(Json(project_response(active.update(&state.db).await?)))
@@ -264,11 +268,54 @@ async fn delete_project(
         .filter(document::Column::ProjectId.eq(&project_id))
         .all(&state.db)
         .await?;
+    let sessions = rehearsal_session::Entity::find()
+        .filter(rehearsal_session::Column::ProjectId.eq(&project_id))
+        .all(&state.db)
+        .await?;
+    let resource_ids = documents
+        .iter()
+        .map(|document| document.id.clone())
+        .chain(sessions.iter().map(|session| session.id.clone()))
+        .collect::<Vec<_>>();
+    let jobs = if resource_ids.is_empty() {
+        Vec::new()
+    } else {
+        analysis_job::Entity::find()
+            .filter(analysis_job::Column::ResourceId.is_in(resource_ids))
+            .all(&state.db)
+            .await?
+    };
+    if !jobs.is_empty() {
+        analysis_job::Entity::delete_many()
+            .filter(analysis_job::Column::Id.is_in(jobs.iter().map(|job| job.id.clone())))
+            .exec(&state.db)
+            .await?;
+    }
     model.delete(&state.db).await?;
     for document in documents {
         let _ = tokio::fs::remove_file(document.storage_path).await;
     }
+    for job in jobs {
+        let _ = tokio::fs::remove_file(
+            state
+                .config
+                .storage_dir
+                .join("tmp")
+                .join(format!("asr-{}.m4a", job.id)),
+        )
+        .await;
+    }
     Ok(Json(json!({"ok": true})))
+}
+
+fn normalize_project_description(description: String) -> ApiResult<Option<String>> {
+    let description = description.trim();
+    if description.chars().count() > 500 {
+        return Err(ApiError::BadRequest(
+            "project description must contain at most 500 characters".into(),
+        ));
+    }
+    Ok((!description.is_empty()).then(|| description.to_owned()))
 }
 
 async fn upload_document(

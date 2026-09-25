@@ -176,7 +176,7 @@ components:
     ProjectId: {name: project_id, in: path, required: true, schema: {type: string, format: uuid}}
     SessionId: {name: session_id, in: path, required: true, schema: {type: string, format: uuid}}
   requestBodies:
-    Credentials: {required: true, content: {application/json: {schema: {type: object, required: [username, password], properties: {username: {type: string, minLength: 3, maxLength: 32}, password: {type: string, minLength: 8, format: password}}}}}}
+    Credentials: {required: true, content: {application/json: {schema: {type: object, required: [username, password], properties: {username: {type: string, minLength: 3, maxLength: 32}, password: {type: string, minLength: 8, maxLength: 128, format: password}}}}}}
     RefreshToken: {required: true, content: {application/json: {schema: {type: object, required: [refresh_token], properties: {refresh_token: {type: string}}}}}}
     FileUpload: {required: true, content: {multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: string, format: binary}}}}}}
   responses:
@@ -188,8 +188,8 @@ components:
   schemas:
     Health: {type: object, required: [status, ai_configured], properties: {status: {type: string, const: ok}, ai_configured: {type: boolean}}}
     TokenPair: {type: object, required: [access_token, refresh_token, token_type, expires_in], properties: {access_token: {type: string}, refresh_token: {type: string}, token_type: {type: string, const: Bearer}, expires_in: {type: integer, const: 900}}}
-    ProjectInput: {type: object, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 80}, description: {type: [string, 'null']}, defense_duration_seconds: {type: integer, minimum: 60, maximum: 1800, default: 300}}}
-    ProjectPatch: {type: object, properties: {name: {type: [string, 'null']}, description: {type: [string, 'null']}, defense_duration_seconds: {type: [integer, 'null'], minimum: 60, maximum: 1800}}}
+    ProjectInput: {type: object, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 80}, description: {type: [string, 'null'], maxLength: 500}, defense_duration_seconds: {type: integer, minimum: 60, maximum: 1800, default: 300}}}
+    ProjectPatch: {type: object, properties: {name: {type: [string, 'null'], minLength: 1, maxLength: 80}, description: {type: [string, 'null'], maxLength: 500}, defense_duration_seconds: {type: [integer, 'null'], minimum: 60, maximum: 1800}}}
     Project: {allOf: [{$ref: '#/components/schemas/ProjectInput'}, {type: object, required: [id, created_at, updated_at, defense_duration_seconds], properties: {id: {type: string, format: uuid}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}]}
     Document: {type: object, required: [id, project_id, filename, media_type, status, created_at], properties: {id: {type: string, format: uuid}, project_id: {type: string, format: uuid}, filename: {type: string}, media_type: {type: string}, status: {type: string, enum: [processing, ready, failed]}, extracted_text: {type: [string, 'null']}, error: {type: [string, 'null']}, created_at: {type: string, format: date-time}}}
     SessionInput: {type: object, properties: {title: {type: [string, 'null']}, target_seconds: {type: [integer, 'null'], minimum: 30, maximum: 1800}, local_video_ref: {type: [string, 'null'], description: 仅限客户端本地引用}}}

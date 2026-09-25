@@ -90,6 +90,75 @@ void main() {
       expect(await storage.read('refresh_token'), 'fresh-refresh');
     },
   );
+
+  test(
+    'updates and deletes a project with the authenticated contract',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'https://speechmirror.test/api/v1'));
+      final storage = MemoryTokenStore({
+        'access_token': 'valid-access',
+        'refresh_token': 'valid-refresh',
+      });
+      Map<String, dynamic>? updateBody;
+      var deleted = false;
+
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            expect(options.headers['authorization'], 'Bearer valid-access');
+            if (options.method == 'PUT' &&
+                options.path.endsWith('/projects/p1')) {
+              updateBody = Map<String, dynamic>.from(options.data as Map);
+              handler.resolve(
+                Response<Map<String, dynamic>>(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: const {
+                    'id': 'p1',
+                    'name': '更新后项目',
+                    'description': null,
+                    'defense_duration_seconds': 420,
+                  },
+                ),
+              );
+              return;
+            }
+            if (options.method == 'DELETE' &&
+                options.path.endsWith('/projects/p1')) {
+              deleted = true;
+              handler.resolve(
+                Response<Map<String, dynamic>>(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: const {'ok': true},
+                ),
+              );
+              return;
+            }
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                message: 'unexpected request',
+              ),
+            );
+          },
+        ),
+      );
+
+      final client = ApiClient(dio: dio, storage: storage);
+      expect(await client.restoreSession(), isTrue);
+      final project = await client.updateProject('p1', '更新后项目', null, 420);
+      await client.deleteProject('p1');
+
+      expect(project.name, '更新后项目');
+      expect(updateBody, {
+        'name': '更新后项目',
+        'description': '',
+        'defense_duration_seconds': 420,
+      });
+      expect(deleted, isTrue);
+    },
+  );
 }
 
 class MemoryTokenStore implements TokenStore {

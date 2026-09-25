@@ -136,6 +136,29 @@ class ApiClient {
     return Project.fromJson(response.data!);
   }
 
+  Future<Project> updateProject(
+    String id,
+    String name,
+    String? description,
+    int seconds,
+  ) async {
+    final response = await _authorized(
+      () => _dio.put<Map<String, dynamic>>(
+        '/projects/$id',
+        data: {
+          'name': name,
+          'description': description ?? '',
+          'defense_duration_seconds': seconds,
+        },
+      ),
+    );
+    return Project.fromJson(response.data!);
+  }
+
+  Future<void> deleteProject(String id) async {
+    await _authorized(() => _dio.delete('/projects/$id'));
+  }
+
   Future<List<ProjectDocument>> listDocuments(String projectId) async {
     final response = await _authorized(
       () => _dio.get<List<dynamic>>('/projects/$projectId/documents'),

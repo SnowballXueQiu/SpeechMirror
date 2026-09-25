@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../api_client.dart';
 import '../auth_controller.dart';
 import '../models.dart';
+import '../project_editor.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -20,6 +21,7 @@ class ProjectDetailScreen extends ConsumerStatefulWidget {
 class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
   late Future<(Project, List<ProjectDocument>)> _data;
   bool _uploading = false;
+  bool _mutating = false;
 
   @override
   void initState() {
@@ -36,7 +38,22 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('项目训练台')),
+    appBar: AppBar(
+      title: const Text('项目训练台'),
+      actions: [
+        IconButton(
+          tooltip: '编辑项目',
+          onPressed: _mutating ? null : _editProject,
+          icon: const Icon(Icons.edit_outlined),
+        ),
+        IconButton(
+          tooltip: '删除项目',
+          onPressed: _mutating ? null : _deleteProject,
+          icon: const Icon(Icons.delete_outline),
+        ),
+        const SizedBox(width: 8),
+      ],
+    ),
     body: FutureBuilder<(Project, List<ProjectDocument>)>(
       future: _data,
       builder: (context, snapshot) {
@@ -190,6 +207,71 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
       },
     ),
   );
+
+  Future<void> _editProject() async {
+    try {
+      final (project, _) = await _data;
+      if (!mounted) return;
+      final draft = await showProjectEditor(context, project: project);
+      if (draft == null || !mounted) return;
+      setState(() => _mutating = true);
+      await ref
+          .read(apiClientProvider)
+          .updateProject(
+            project.id,
+            draft.name,
+            draft.description,
+            draft.durationSeconds,
+          );
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _mutating = false);
+    }
+  }
+
+  Future<void> _deleteProject() async {
+    try {
+      final (project, _) = await _data;
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('彻底删除项目？'),
+          content: Text('将删除“${project.name}”的材料、训练记录、报告和评委问答。此操作无法撤销。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton.icon(
+              key: const ValueKey('confirm-project-deletion'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('彻底删除'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      setState(() => _mutating = true);
+      await ref.read(apiClientProvider).deleteProject(project.id);
+      if (!mounted) return;
+      if (context.canPop()) {
+        context.pop(true);
+      } else {
+        context.go('/projects');
+      }
+    } catch (error) {
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _mutating = false);
+    }
+  }
 
   Future<void> _pickFile() async {
     final result = await picker.FilePicker.platform.pickFiles(
