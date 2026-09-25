@@ -73,16 +73,22 @@ async fn index_document_text(
     model: document::Model,
     text: String,
 ) -> ApiResult<()> {
-    document_chunk::Entity::delete_many()
-        .filter(document_chunk::Column::DocumentId.eq(&model.id))
-        .exec(&state.db)
-        .await?;
+    let text = text.trim().to_owned();
+    if text.is_empty() {
+        return Err(ApiError::BadRequest(
+            "document contains no extractable text".into(),
+        ));
+    }
     let chunks = chunk_text(&text, 800, 100);
     let embeddings = if state.ai.is_configured() {
         state.ai.embeddings(&chunks).await?
     } else {
         vec![Vec::new(); chunks.len()]
     };
+    document_chunk::Entity::delete_many()
+        .filter(document_chunk::Column::DocumentId.eq(&model.id))
+        .exec(&state.db)
+        .await?;
     for (ordinal, (content, embedding)) in chunks.into_iter().zip(embeddings).enumerate() {
         document_chunk::ActiveModel {
             id: Set(Uuid::new_v4().to_string()),
@@ -120,7 +126,7 @@ async fn extract_text(state: &AppState, path: &Path, media_type: &str) -> ApiRes
         return Ok(tokio::fs::read_to_string(path).await?);
     }
     if media_type.starts_with("image/") {
-        return state.ai.ocr_image(path, media_type).await;
+        return extract_image_text(state, path, media_type).await;
     }
     if media_type == "application/pdf" {
         return extract_pdf_with_ocr_fallback(state, path).await;
@@ -146,16 +152,25 @@ async fn extract_text(state: &AppState, path: &Path, media_type: &str) -> ApiRes
             .output()
             .await?;
         if !output.status.success() {
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
             return Err(ApiError::Internal(format!(
                 "document conversion failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
         }
-        let stem = path
-            .file_stem()
-            .and_then(|v| v.to_str())
-            .unwrap_or("document");
-        let pdf = temp_dir.join(format!("{stem}.pdf"));
+        let pdf = match first_file_with_extension(&temp_dir, "pdf").await {
+            Ok(Some(pdf)) => pdf,
+            Ok(None) => {
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+                return Err(ApiError::Internal(
+                    "document conversion produced no PDF".into(),
+                ));
+            }
+            Err(error) => {
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+                return Err(error);
+            }
+        };
         let result = extract_pdf_with_ocr_fallback(state, &pdf).await;
         let _ = tokio::fs::remove_dir_all(temp_dir).await;
         return result;
@@ -172,13 +187,12 @@ async fn extract_pdf_with_ocr_fallback(state: &AppState, path: &Path) -> ApiResu
         .arg(path)
         .arg("-")
         .output()
-        .await?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if output.status.success() && text.chars().count() >= 20 {
-        return Ok(text);
-    }
-    if !state.ai.is_configured() {
-        return Err(ApiError::AiNotConfigured);
+        .await;
+    if let Ok(output) = output {
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if output.status.success() && text.chars().count() >= 20 {
+            return Ok(text);
+        }
     }
     let temp_dir = state
         .config
@@ -193,8 +207,16 @@ async fn extract_pdf_with_ocr_fallback(state: &AppState, path: &Path) -> ApiResu
         .arg(path)
         .arg(&prefix)
         .status()
-        .await?;
+        .await;
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+            return Err(error.into());
+        }
+    };
     if !status.success() {
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
         return Err(ApiError::Internal("PDF rendering for OCR failed".into()));
     }
     let mut pages = Vec::new();
@@ -207,11 +229,62 @@ async fn extract_pdf_with_ocr_fallback(state: &AppState, path: &Path) -> ApiResu
     pages.sort();
     let mut result = String::new();
     for page in pages {
-        result.push_str(&state.ai.ocr_image(&page, "image/png").await?);
+        let page_text = extract_image_text(state, &page, "image/png").await;
+        let page_text = match page_text {
+            Ok(text) => text,
+            Err(error) => {
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+                return Err(error);
+            }
+        };
+        result.push_str(&page_text);
         result.push_str("\n\n");
     }
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
     Ok(result)
+}
+
+async fn extract_image_text(state: &AppState, path: &Path, media_type: &str) -> ApiResult<String> {
+    if state.ai.is_configured() {
+        return state.ai.ocr_image(path, media_type).await;
+    }
+    let tesseract = std::env::var("TESSERACT_BIN").unwrap_or_else(|_| "tesseract".into());
+    let languages = std::env::var("TESSERACT_LANG").unwrap_or_else(|_| "chi_sim+eng".into());
+    // Leptonica on macOS cannot open paths through the /tmp -> /private/tmp symlink.
+    let canonical_path = tokio::fs::canonicalize(path).await?;
+    let output = Command::new(tesseract)
+        .arg(canonical_path)
+        .arg("stdout")
+        .args(["-l", &languages])
+        .output()
+        .await
+        .map_err(|error| {
+            ApiError::Internal(format!(
+                "OCR is not configured and local Tesseract could not start: {error}"
+            ))
+        })?;
+    if !output.status.success() {
+        return Err(ApiError::Internal(format!(
+            "local OCR failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+async fn first_file_with_extension(root: &Path, extension: &str) -> ApiResult<Option<PathBuf>> {
+    let mut entries = tokio::fs::read_dir(root).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+        {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 pub fn chunk_text(text: &str, max_chars: usize, overlap: usize) -> Vec<String> {

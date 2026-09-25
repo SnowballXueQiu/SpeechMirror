@@ -74,13 +74,21 @@ paths:
         '200': {description: 材料列表, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Document'}}}}}
     post:
       operationId: uploadDocument
-      requestBody: {$ref: '#/components/requestBodies/FileUpload'}
+      description: 支持 PDF、PPTX、DOCX、UTF-8 TXT/Markdown、PNG 和 JPEG，扩展名、媒体类型与文件特征必须一致，单文件不超过 25 MiB。
+      requestBody: {$ref: '#/components/requestBodies/DocumentUpload'}
       responses:
         '200': {description: 已持久化并排队处理, content: {application/json: {schema: {$ref: '#/components/schemas/Document'}}}}
+        '400': {description: 文件格式、内容或大小无效, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /documents/{document_id}:
+    get:
+      operationId: getDocument
+      parameters: [{$ref: '#/components/parameters/DocumentId'}]
+      responses:
+        '200': {description: 材料处理状态与提取文本, content: {application/json: {schema: {$ref: '#/components/schemas/Document'}}}}
   /documents/{document_id}/text:
     put:
       operationId: correctDocumentText
-      parameters: [{name: document_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters: [{$ref: '#/components/parameters/DocumentId'}]
       requestBody:
         required: true
         content: {application/json: {schema: {type: object, required: [text], properties: {text: {type: string}}}}}
@@ -174,10 +182,12 @@ components:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
   parameters:
     ProjectId: {name: project_id, in: path, required: true, schema: {type: string, format: uuid}}
+    DocumentId: {name: document_id, in: path, required: true, schema: {type: string, format: uuid}}
     SessionId: {name: session_id, in: path, required: true, schema: {type: string, format: uuid}}
   requestBodies:
     Credentials: {required: true, content: {application/json: {schema: {type: object, required: [username, password], properties: {username: {type: string, minLength: 3, maxLength: 32}, password: {type: string, minLength: 8, maxLength: 128, format: password}}}}}}
     RefreshToken: {required: true, content: {application/json: {schema: {type: object, required: [refresh_token], properties: {refresh_token: {type: string}}}}}}
+    DocumentUpload: {required: true, content: {multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: string, format: binary, maxLength: 26214400}}}}}}
     FileUpload: {required: true, content: {multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: string, format: binary}}}}}}
   responses:
     Ok: {description: 操作成功, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {type: boolean}}}}}}

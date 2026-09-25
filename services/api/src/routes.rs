@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{io::Cursor, path::PathBuf};
 
 use axum::{
     Extension, Json, Router,
@@ -49,6 +49,7 @@ pub fn api_router(state: AppState) -> Router {
             "/projects/{project_id}/documents",
             get(list_documents).post(upload_document),
         )
+        .route("/documents/{document_id}", get(get_document))
         .route("/documents/{document_id}/text", put(correct_document_text))
         .route(
             "/projects/{project_id}/sessions",
@@ -345,9 +346,9 @@ async fn upload_document(
             break;
         }
     }
-    let (filename, media_type, data) =
+    let (filename, declared_media_type, data) =
         upload.ok_or_else(|| ApiError::BadRequest("multipart field 'file' is required".into()))?;
-    validate_media_type(&media_type)?;
+    let media_type = validate_document_upload(&filename, &declared_media_type, &data)?.to_owned();
     let id = Uuid::new_v4().to_string();
     let directory = state
         .config
@@ -358,7 +359,7 @@ async fn upload_document(
     tokio::fs::create_dir_all(&directory).await?;
     let path = directory.join(format!("{id}-{filename}"));
     tokio::fs::write(&path, data).await?;
-    let model = document::ActiveModel {
+    let model = match (document::ActiveModel {
         id: Set(id.clone()),
         project_id: Set(project_id),
         filename: Set(filename),
@@ -368,10 +369,21 @@ async fn upload_document(
         extracted_text: Set(None),
         error: Set(None),
         created_at: Set(Utc::now()),
-    }
+    })
     .insert(&state.db)
-    .await?;
-    enqueue_document_ingestion(&state, &id).await?;
+    .await
+    {
+        Ok(model) => model,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(error.into());
+        }
+    };
+    if let Err(error) = enqueue_document_ingestion(&state, &id).await {
+        let _ = document::Entity::delete_by_id(&id).exec(&state.db).await;
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(error);
+    }
     Ok(Json(document_response(model)))
 }
 
@@ -387,6 +399,19 @@ async fn list_documents(
         .all(&state.db)
         .await?;
     Ok(Json(models.into_iter().map(document_response).collect()))
+}
+
+async fn get_document(
+    State(state): State<AppState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(document_id): Path<String>,
+) -> ApiResult<Json<DocumentResponse>> {
+    let model = document::Entity::find_by_id(document_id)
+        .one(&state.db)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    owned_project(&state, &user.id, &model.project_id).await?;
+    Ok(Json(document_response(model)))
 }
 
 async fn correct_document_text(
@@ -942,21 +967,91 @@ fn safe_filename(input: &str) -> String {
     }
 }
 
-fn validate_media_type(media_type: &str) -> ApiResult<()> {
-    const ALLOWED: &[&str] = &[
-        "application/pdf",
-        "text/plain",
-        "text/markdown",
-        "image/png",
-        "image/jpeg",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ];
-    if ALLOWED.contains(&media_type) {
-        Ok(())
-    } else {
-        Err(ApiError::BadRequest(format!(
-            "unsupported media type: {media_type}"
-        )))
+const MAX_DOCUMENT_BYTES: usize = 25 * 1024 * 1024;
+
+fn validate_document_upload(
+    filename: &str,
+    declared_media_type: &str,
+    data: &[u8],
+) -> ApiResult<&'static str> {
+    if data.is_empty() {
+        return Err(ApiError::BadRequest("uploaded document is empty".into()));
+    }
+    if data.len() > MAX_DOCUMENT_BYTES {
+        return Err(ApiError::BadRequest(
+            "document exceeds the 25 MiB upload limit".into(),
+        ));
+    }
+    let extension = PathBuf::from(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| {
+            ApiError::BadRequest("document filename needs a supported extension".into())
+        })?;
+    let expected = match extension.as_str() {
+        "pdf" => "application/pdf",
+        "txt" => "text/plain",
+        "md" => "text/markdown",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => {
+            return Err(ApiError::BadRequest(format!(
+                "unsupported document extension: {extension}"
+            )));
+        }
+    };
+    if declared_media_type != "application/octet-stream" && declared_media_type != expected {
+        return Err(ApiError::BadRequest(format!(
+            "file extension and media type do not match: {extension} / {declared_media_type}"
+        )));
+    }
+
+    let valid_content = match extension.as_str() {
+        "pdf" => data.starts_with(b"%PDF-"),
+        "png" => data.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpg" | "jpeg" => data.starts_with(&[0xff, 0xd8, 0xff]),
+        "txt" | "md" => std::str::from_utf8(data).is_ok() && !data.contains(&0),
+        "docx" => office_archive_contains(data, "word/document.xml"),
+        "pptx" => office_archive_contains(data, "ppt/presentation.xml"),
+        _ => false,
+    };
+    if !valid_content {
+        return Err(ApiError::BadRequest(format!(
+            "file content is not a valid {extension} document"
+        )));
+    }
+    Ok(expected)
+}
+
+fn office_archive_contains(data: &[u8], required_entry: &str) -> bool {
+    let Ok(mut archive) = zip::ZipArchive::new(Cursor::new(data)) else {
+        return false;
+    };
+    archive.by_name(required_entry).is_ok()
+}
+
+#[cfg(test)]
+mod document_upload_tests {
+    use super::*;
+
+    #[test]
+    fn validates_extension_media_type_content_and_size() {
+        assert_eq!(
+            validate_document_upload("notes.md", "text/markdown", b"# SpeechMirror").unwrap(),
+            "text/markdown"
+        );
+        assert!(validate_document_upload("fake.pdf", "application/pdf", b"plain text").is_err());
+        assert!(validate_document_upload("image.png", "image/jpeg", b"\x89PNG\r\n\x1a\n").is_err());
+        assert!(
+            validate_document_upload(
+                "large.txt",
+                "text/plain",
+                &vec![b'a'; MAX_DOCUMENT_BYTES + 1],
+            )
+            .is_err()
+        );
     }
 }

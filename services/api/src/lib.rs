@@ -456,6 +456,105 @@ mod tests {
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 
+    #[tokio::test]
+    async fn text_document_upload_processing_and_correction_flow() {
+        let temp = tempdir().unwrap();
+        let router = app(Config::test(temp.path().to_owned())).await.unwrap();
+        let registered = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"material_owner","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        let registered: Value =
+            serde_json::from_slice(&registered.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let token = registered["access_token"].as_str().unwrap();
+
+        let project = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/projects",
+                json!({"name":"材料解析测试","defense_duration_seconds":300}),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        let project: Value =
+            serde_json::from_slice(&project.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let project_id = project["id"].as_str().unwrap();
+
+        let uploaded = router
+            .clone()
+            .oneshot(multipart_request(
+                &format!("/api/v1/projects/{project_id}/documents"),
+                "defense.md",
+                "text/markdown",
+                b"# SpeechMirror\n\nMaterial-grounded defense rehearsal.",
+                token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(uploaded.status(), StatusCode::OK);
+        let uploaded: Value =
+            serde_json::from_slice(&uploaded.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let document_id = uploaded["id"].as_str().unwrap();
+        assert_eq!(uploaded["status"], "processing");
+        assert_eq!(uploaded["media_type"], "text/markdown");
+
+        let mut ready = None;
+        for _ in 0..30 {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/documents/{document_id}"))
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: Value =
+                serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            if body["status"] == "ready" {
+                ready = Some(body);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let ready = ready.expect("document ingestion did not finish");
+        assert!(
+            ready["extracted_text"]
+                .as_str()
+                .unwrap()
+                .contains("Material-grounded")
+        );
+
+        let corrected = router
+            .oneshot(json_request_with_method(
+                Method::PUT,
+                &format!("/api/v1/documents/{document_id}/text"),
+                json!({"text":"已校正的答辩材料文本"}),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(corrected.status(), StatusCode::OK);
+        let corrected: Value =
+            serde_json::from_slice(&corrected.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(corrected["status"], "ready");
+        assert_eq!(corrected["extracted_text"], "已校正的答辩材料文本");
+    }
+
     fn json_request(uri: &str, body: Value, token: Option<&str>) -> Request<Body> {
         json_request_with_method(Method::POST, uri, body, token)
     }
@@ -474,5 +573,31 @@ mod tests {
             builder = builder.header("authorization", format!("Bearer {token}"));
         }
         builder.body(Body::from(body.to_string())).unwrap()
+    }
+
+    fn multipart_request(
+        uri: &str,
+        filename: &str,
+        media_type: &str,
+        contents: &[u8],
+        token: &str,
+    ) -> Request<Body> {
+        const BOUNDARY: &str = "speechmirror-test-boundary";
+        let mut body = format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {media_type}\r\n\r\n"
+        )
+        .into_bytes();
+        body.extend_from_slice(contents);
+        body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+        Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={BOUNDARY}"),
+            )
+            .body(Body::from(body))
+            .unwrap()
     }
 }

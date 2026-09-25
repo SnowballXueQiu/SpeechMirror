@@ -26,3 +26,16 @@
 - 流程：创建本地测试账号后进入项目列表，创建 6 分钟答辩项目并进入项目训练台。
 - 构建核验：`flutter build ios --simulator --debug` 通过，生成未签名 Simulator 调试包。
 - 界面证据：[Xcode 调试中的 iOS 项目详情](ios-project-management.png)。
+
+## 2026-09-25 五类材料导入与解析闭环
+
+- 环境：本地 Axum API、SQLite 调试库、Poppler、LibreOffice 和 Tesseract；Android Studio Debug 与 Xcode Debug 分别连接 Android 15 和 iOS 26.2 模拟器。
+- 样本：Markdown、PDF、DOCX、PPTX、PNG 图片和扫描 PDF 共 6 份；全部状态由 `processing` 进入 `ready`。
+- 安全校验：服务端联合检查扩展名、MIME、文件特征及 OOXML ZIP 结构；将普通文本伪装为 PDF 上传时返回 HTTP 400。
+- 数据核验：6 份材料均提取出非空文本，并各生成 1 个数据库分块；图片和扫描 PDF 均通过本地 OCR 获得文本。
+- 校对核验：在材料文本页修改图片识别结果并保存，旧分块被替换，材料重新进入 `ready`。
+- 未验证边界：健康接口为 `ai_configured: false`，6 个分块的向量均为空，因此本记录不声称 Embedding 或相似度检索已验证。
+- 自动化验证：Rust 10 项测试和 Flutter 10 项测试全部通过，`flutter analyze` 无问题，OpenAPI YAML 可解析。
+- 构建验证：Android Debug APK SHA-256 为 `704e177823809c37f9de2e485621d8a150acc37a634cf6d63dbe83886c6b4d6d`；iOS Simulator Debug ZIP SHA-256 为 `34688c4ccacb1048df39fbe81c85bb3aca973f1d22871a69f7acc119500f94f3`。
+- Android 证据：[材料列表](android-material-processing.png)、[材料文本校对](android-material-text.png)、[Android Studio 调试器](android-studio-material-debug.png)。
+- iOS 证据：[材料列表](ios-material-processing.png)、[扫描 PDF OCR 文本](ios-material-text.png)、[Xcode 调试器](xcode-material-debug.png)。

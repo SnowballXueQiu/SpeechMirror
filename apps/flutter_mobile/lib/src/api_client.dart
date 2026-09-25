@@ -168,6 +168,13 @@ class ApiClient {
         .toList();
   }
 
+  Future<ProjectDocument> getDocument(String documentId) async {
+    final response = await _authorized(
+      () => _dio.get<Map<String, dynamic>>('/documents/$documentId'),
+    );
+    return ProjectDocument.fromJson(response.data!);
+  }
+
   Future<ProjectDocument> uploadDocument(
     String projectId,
     PlatformFile file,
@@ -184,6 +191,19 @@ class ApiClient {
       () => _dio.post<Map<String, dynamic>>(
         '/projects/$projectId/documents',
         data: form,
+      ),
+    );
+    return ProjectDocument.fromJson(response.data!);
+  }
+
+  Future<ProjectDocument> correctDocumentText(
+    String documentId,
+    String text,
+  ) async {
+    final response = await _authorized(
+      () => _dio.put<Map<String, dynamic>>(
+        '/documents/$documentId/text',
+        data: {'text': text},
       ),
     );
     return ProjectDocument.fromJson(response.data!);
@@ -396,7 +416,8 @@ class ApiClient {
     'pptx' => DioMediaType.parse(
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     ),
-    'txt' || 'md' => DioMediaType.parse('text/plain'),
+    'txt' => DioMediaType.parse('text/plain'),
+    'md' => DioMediaType.parse('text/markdown'),
     'png' => DioMediaType.parse('image/png'),
     'jpg' || 'jpeg' => DioMediaType.parse('image/jpeg'),
     _ => DioMediaType.parse('application/octet-stream'),

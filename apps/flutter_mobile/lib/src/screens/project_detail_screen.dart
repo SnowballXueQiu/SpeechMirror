@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart' as picker;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,21 +22,43 @@ class ProjectDetailScreen extends ConsumerStatefulWidget {
 
 class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
   late Future<(Project, List<ProjectDocument>)> _data;
+  Timer? _statusTimer;
   bool _uploading = false;
   bool _mutating = false;
 
   @override
   void initState() {
     super.initState();
-    _reload();
+    _data = _loadData();
   }
 
-  void _reload() => setState(() {
+  @override
+  void dispose() {
+    _statusTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<(Project, List<ProjectDocument>)> _loadData() {
     final api = ref.read(apiClientProvider);
-    _data = Future.wait(
+    final result = Future.wait(
       [api.getProject(widget.projectId), api.listDocuments(widget.projectId)],
     ).then((items) => (items[0] as Project, items[1] as List<ProjectDocument>));
-  });
+    result.then<void>((data) {
+      if (!mounted) return;
+      _statusTimer?.cancel();
+      if (data.$2.any((document) => document.status == 'processing')) {
+        _statusTimer = Timer(const Duration(seconds: 2), _reload);
+      }
+    }, onError: (_) {});
+    return result;
+  }
+
+  void _reload() {
+    _statusTimer?.cancel();
+    setState(() {
+      _data = _loadData();
+    });
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -136,6 +160,14 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
             for (final document in documents) ...[
               Card(
                 child: ListTile(
+                  onTap: document.status == 'processing'
+                      ? null
+                      : () async {
+                          await context.push(
+                            '/projects/${project.id}/documents/${document.id}',
+                          );
+                          if (mounted) _reload();
+                        },
                   leading: Icon(
                     _documentIcon(document.mediaType),
                     color: AppColors.jade,
@@ -159,7 +191,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : null,
+                      : const Icon(Icons.chevron_right),
                 ),
               ),
               const SizedBox(height: 10),
@@ -289,6 +321,10 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
     );
     if (result == null || result.files.isEmpty) return;
     final file = result.files.single;
+    if (file.size > 25 * 1024 * 1024) {
+      if (mounted) showError(context, const ApiException('材料大小不能超过 25 MiB'));
+      return;
+    }
     setState(() => _uploading = true);
     try {
       await ref

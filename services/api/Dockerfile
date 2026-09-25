@@ -9,7 +9,7 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates libreoffice-core libreoffice-impress libreoffice-writer \
-       poppler-utils fonts-noto-cjk \
+       poppler-utils tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 speechmirror
 WORKDIR /app
