@@ -9,7 +9,7 @@ struct ProjectsPage {
   @State busy: boolean = true;
   @State error: string = '';
 
-  aboutToAppear(): void { this.reload(); }
+  onPageShow(): void { this.reload(); }
 
   private async reload(): Promise<void> {
     this.busy = true;

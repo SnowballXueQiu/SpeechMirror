@@ -11,8 +11,9 @@
 - [x] 完成项目创建、读取、编辑、永久删除及返回列表刷新，并在 Android Studio 与 Xcode 中实测。
 - [x] 安装 DevEco Studio 6.0.1 与内置 HarmonyOS 6/API 21 SDK。
 - [x] 用 DevEco Studio 从英文仓库路径导入 `apps/harmony`，完成 IDE 同步、ArkTS/C++ 编译并生成首个未签名 HAP。
-- [ ] 由用户确认 HarmonyOS 软件许可协议，下载模拟器镜像并完成模拟器配置。
-- [ ] 配置调试签名，在模拟器或真机安装并运行 HAP。
+- [x] 用户确认 HarmonyOS 软件许可协议，下载 HarmonyOS 6.0.1/API 21 手机镜像并创建 `SpeechMirror_Harmony_QA` 模拟器。
+- [x] 在 HarmonyOS 6.0.1 模拟器安装并运行 Debug HAP，完成真实登录、项目创建和项目列表回退刷新验证。
+- [ ] 配置调试签名，在 HarmonyOS 6 真机安装并运行 HAP。
 
 验收证据：IDE 构建日志、模拟器或真机登录页截图、安装包 SHA-256。
 
@@ -96,7 +97,8 @@
 ## 10. 论文与竞赛材料
 
 - [ ] 获得合法授权的方正小标宋简体与仿宋 GB2312 字体文件。
-- [ ] 从 iOS、Android 和 HarmonyOS 实际运行应用采集无隐私信息截图。
+- [x] 从 iOS、Android 和 HarmonyOS 模拟器实际运行应用采集无隐私信息截图。
+- [ ] 从 HarmonyOS 6 真机采集安装、登录和核心流程截图。
 - [ ] 仅将有原始记录的 AI、性能和能耗数据写入论文。
 - [ ] 是否进行问卷或用户访谈由参赛要求决定；若开展，必须保留知情同意与匿名原始记录。
 - [ ] 在不重复内容、不使用空白页和无意义大图的前提下整理 95 至 105 页终稿。

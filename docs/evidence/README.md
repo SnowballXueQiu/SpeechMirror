@@ -70,4 +70,15 @@
 - IDE 核验：Ohpm Install、Build Init 与 `entry:compileNative` 均显示 successful，原生编译日志以 exit code 0 结束。
 - 构建核验：正式仓库路径下执行干净构建成功，ArkTS 生成 `ets/modules.abc`，原生层生成 `libs/arm64-v8a/libspeechmirror_edge_napi.so`。
 - 产物：`output/harmony/SpeechMirror-debug-unsigned.hap`，SHA-256 为 `54bb76862e67400a52ecffe26ca4172e64c3f9d8e38ec24dd7163b341272ae76`。
-- 未验证边界：当前 HAP 未签名；HarmonyOS 软件许可协议、模拟器镜像、设备安装与运行尚未完成，因此本记录不声称模拟器或真机运行成功。
+- 当时的验证边界：该提交只完成未签名 HAP 构建；后续模拟器运行结果见下一节。
+
+## 2026-09-25 HarmonyOS 6 模拟器账号与项目闭环
+
+- 环境：DevEco Studio `6.0.1.251`、HarmonyOS 6.0.1/API 21 手机镜像，ARM64 模拟器 `SpeechMirror_Harmony_QA`；系统版本命令返回 `emulator 6.0.0.112(SP3DEVC00E112R4P11)`。
+- 连接：HDC 目标为 `127.0.0.1:5557`，通过 `rport tcp:8080 tcp:8080` 将模拟器内的 `127.0.0.1:8080` 映射到本机 Axum 服务；服务健康接口返回 `status: ok`。
+- 安装：Debug HAP 通过 HDC 安装成功，应用包名为 `cn.speechmirror.harmony`，`EntryAbility` 启动成功。模拟器允许安装未签名调试包，本记录不据此声称真机签名已完成。
+- 流程：使用专用测试账号登录本地 Axum/SQLite，项目列表读取成功；在 HarmonyOS 端创建 5 分钟项目并进入详情页，项目说明为“`HarmonyOS 6 端创建`”。
+- 回归修复：首次实测发现详情页返回后列表未刷新；将项目列表加载绑定到 `onPageShow` 后重新构建、覆盖安装并复测，返回列表能够显示真实项目卡片。
+- 构建核验：Hvigor 类型检查、ArkTS、C++ N-API 与 HAP 打包均通过；最新 `output/harmony/SpeechMirror-debug-unsigned.hap` SHA-256 为 `e34965dab7d2c8c81939f0ae01318bbbc8daeb7976c18fa83705b80243ff92f4`。
+- 未验证边界：尚未配置 HarmonyOS 真机调试签名，也未完成真机安装、摄像头录制或 MindSpore Lite 推理，因此不作对应声明。
+- 界面证据：[HarmonyOS 6 登录页](harmony-login-screen.png)、[真实登录后的项目列表](harmony-auth-projects.png)。
