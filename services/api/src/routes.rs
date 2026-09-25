@@ -9,7 +9,7 @@ use axum::{
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, ModelTrait, QueryFilter,
-    QueryOrder, sea_query::Expr,
+    QueryOrder, TransactionTrait, sea_query::Expr,
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -682,54 +682,157 @@ async fn generate_questions(
         .map(|c| format!("[{}] {}", c.id, c.content))
         .collect::<Vec<_>>()
         .join("\n");
-    let prompt = format!(
-        "请根据以下材料生成{count}个中文答辩问题，覆盖技术、应用、创新、风险和质疑。只返回JSON：{{\"questions\":[{{\"category\":\"技术\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"...\"}}]}}]}}。证据必须来自材料。\n\n{material}"
-    );
-    let value = state
-        .ai
-        .chat_json("你是严格但建设性的计算机应用大赛评委。", &prompt)
-        .await?;
-    let items = value
-        .get("questions")
-        .and_then(Value::as_array)
-        .ok_or_else(|| ApiError::Internal("question response is malformed".into()))?;
-    let mut responses = Vec::new();
-    for item in items.iter().take(count) {
-        let question_text = item
-            .get("question")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim();
-        if question_text.is_empty() {
-            continue;
+    let category_plan = question_category_plan(count);
+    let mut candidates = Vec::with_capacity(count);
+    for _ in 0..QUESTION_GENERATION_MAX_ATTEMPTS {
+        let missing = missing_question_categories(&category_plan, &candidates);
+        if missing.is_empty() {
+            break;
         }
-        let evidence = verified_evidence(item.get("evidence"), &chunks);
-        if evidence.is_empty() {
-            continue;
-        }
+        let prompt = question_generation_prompt(&material, &missing);
+        let value = state
+            .ai
+            .chat_json("你是严格但建设性的计算机应用大赛评委。", &prompt)
+            .await?;
+        accept_question_candidates(&value, &chunks, &category_plan, &mut candidates);
+    }
+    let candidates = order_question_candidates(&category_plan, candidates);
+    if candidates.len() != count {
+        let missing = missing_question_categories(&category_plan, &candidates).join("、");
+        return Err(ApiError::Internal(format!(
+            "AI question response did not provide valid questions for: {missing}"
+        )));
+    }
+
+    let transaction = state.db.begin().await?;
+    let mut responses = Vec::with_capacity(count);
+    for candidate in candidates {
         let model = jury_question::ActiveModel {
             id: Set(Uuid::new_v4().to_string()),
             project_id: Set(project_id.clone()),
             session_id: Set(body.session_id.clone()),
-            category: Set(item
-                .get("category")
-                .and_then(Value::as_str)
-                .unwrap_or("综合")
-                .to_owned()),
-            question: Set(question_text.to_owned()),
-            evidence_json: Set(serde_json::to_value(&evidence)?),
+            category: Set(candidate.category),
+            question: Set(candidate.question),
+            evidence_json: Set(serde_json::to_value(&candidate.evidence)?),
             created_at: Set(Utc::now()),
         }
-        .insert(&state.db)
+        .insert(&transaction)
         .await?;
         responses.push(question_response(model)?);
     }
-    if responses.is_empty() {
-        return Err(ApiError::Internal(
-            "AI question response did not contain verifiable material evidence".into(),
-        ));
-    }
+    transaction.commit().await?;
     Ok(Json(responses))
+}
+
+const CORE_QUESTION_CATEGORIES: [&str; 5] = ["技术", "应用", "创新", "风险", "质疑"];
+const QUESTION_GENERATION_MAX_ATTEMPTS: usize = 3;
+
+#[derive(Debug)]
+struct QuestionCandidate {
+    category: String,
+    question: String,
+    evidence: Vec<EvidenceRef>,
+}
+
+fn question_category_plan(count: usize) -> Vec<&'static str> {
+    CORE_QUESTION_CATEGORIES
+        .into_iter()
+        .cycle()
+        .take(count)
+        .collect()
+}
+
+fn missing_question_categories<'a>(
+    category_plan: &'a [&'static str],
+    candidates: &[QuestionCandidate],
+) -> Vec<&'a str> {
+    let mut available = candidates
+        .iter()
+        .map(|candidate| candidate.category.as_str())
+        .collect::<Vec<_>>();
+    category_plan
+        .iter()
+        .filter_map(|category| {
+            available
+                .iter()
+                .position(|accepted| accepted == category)
+                .map(|position| available.remove(position))
+                .is_none()
+                .then_some(*category)
+        })
+        .collect()
+}
+
+fn question_generation_prompt(material: &str, missing: &[&str]) -> String {
+    format!(
+        "请根据材料生成{}个中文答辩问题。类别必须依次为：{}。每个问题的category必须逐字使用对应类别；question不能为空；evidence至少包含一项；chunk_id必须复制材料方括号中的编号；quote必须是对应材料中的连续原文，不得改写或概括。只返回JSON：{{\"questions\":[{{\"category\":\"技术\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n材料：\n{material}",
+        missing.len(),
+        missing.join("、"),
+        missing.len(),
+    )
+}
+
+fn accept_question_candidates(
+    value: &Value,
+    chunks: &[crate::entities::document_chunk::Model],
+    category_plan: &[&'static str],
+    candidates: &mut Vec<QuestionCandidate>,
+) {
+    let Some(items) = value.get("questions").and_then(Value::as_array) else {
+        return;
+    };
+    let mut missing = missing_question_categories(category_plan, candidates);
+    for item in items {
+        let Some(category) = item.get("category").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        let Some(category_position) = missing.iter().position(|expected| *expected == category)
+        else {
+            continue;
+        };
+        let Some(question) = item
+            .get("question")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|question| !question.is_empty())
+        else {
+            continue;
+        };
+        if candidates
+            .iter()
+            .any(|candidate| candidate.question == question)
+        {
+            continue;
+        }
+        let evidence = verified_evidence(item.get("evidence"), chunks);
+        if evidence.is_empty() {
+            continue;
+        }
+        candidates.push(QuestionCandidate {
+            category: category.to_owned(),
+            question: question.to_owned(),
+            evidence,
+        });
+        missing.remove(category_position);
+        if missing.is_empty() {
+            break;
+        }
+    }
+}
+
+fn order_question_candidates(
+    category_plan: &[&'static str],
+    mut candidates: Vec<QuestionCandidate>,
+) -> Vec<QuestionCandidate> {
+    category_plan
+        .iter()
+        .filter_map(|category| {
+            let position = candidates
+                .iter()
+                .position(|candidate| candidate.category == *category)?;
+            Some(candidates.remove(position))
+        })
+        .collect()
 }
 
 async fn list_questions(
@@ -1096,6 +1199,73 @@ mod route_tests {
             )
             .is_err()
         );
+    }
+
+    fn question_test_chunk() -> crate::entities::document_chunk::Model {
+        crate::entities::document_chunk::Model {
+            id: "chunk-1".into(),
+            document_id: "document-1".into(),
+            project_id: "project-1".into(),
+            ordinal: 0,
+            content: "系统采用端云协同架构，原始视频只保存在手机本地。".into(),
+            embedding: None,
+        }
+    }
+
+    #[test]
+    fn question_candidates_require_exact_category_question_and_evidence() {
+        let chunks = vec![question_test_chunk()];
+        let plan = question_category_plan(5);
+        let value = json!({"questions": [
+            {"category":"技术", "question":"系统如何实现端云协同？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
+            {"category":"应用", "question":" ", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频"}]},
+            {"category":"创新", "question":"创新点是什么？", "evidence":[{"chunk_id":"chunk-1", "quote":"不存在的原文"}]},
+            {"category":"风险类", "question":"有什么风险？", "evidence":[{"chunk_id":"chunk-1", "quote":"手机本地"}]},
+            {"category":"质疑", "question":"为什么不上传视频？", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频只保存在手机本地"}]},
+            {"category":"应用", "question":"系统如何实现端云协同？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+        ]});
+        let mut candidates = Vec::new();
+
+        accept_question_candidates(&value, &chunks, &plan, &mut candidates);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].category, "技术");
+        assert_eq!(candidates[1].category, "质疑");
+        assert_eq!(
+            missing_question_categories(&plan, &candidates),
+            vec!["应用", "创新", "风险"]
+        );
+    }
+
+    #[test]
+    fn question_retry_fills_only_missing_categories_and_restores_plan_order() {
+        let chunks = vec![question_test_chunk()];
+        let plan = question_category_plan(5);
+        let first = json!({"questions": [
+            {"category":"技术", "question":"技术问题", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
+            {"category":"质疑", "question":"质疑问题", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频"}]}
+        ]});
+        let retry = json!({"questions": [
+            {"category":"风险", "question":"风险问题", "evidence":[{"chunk_id":"chunk-1", "quote":"手机本地"}]},
+            {"category":"创新", "question":"创新问题", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
+            {"category":"应用", "question":"应用问题", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频只保存在手机本地"}]},
+            {"category":"技术", "question":"不应重复补充的技术问题", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+        ]});
+        let mut candidates = Vec::new();
+
+        accept_question_candidates(&first, &chunks, &plan, &mut candidates);
+        accept_question_candidates(&retry, &chunks, &plan, &mut candidates);
+        let ordered = order_question_candidates(&plan, candidates);
+
+        assert_eq!(ordered.len(), 5);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|candidate| candidate.category.as_str())
+                .collect::<Vec<_>>(),
+            CORE_QUESTION_CATEGORIES
+        );
+        assert!(missing_question_categories(&plan, &ordered).is_empty());
     }
 
     #[test]
