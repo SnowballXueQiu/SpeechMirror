@@ -12,31 +12,61 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+abstract interface class TokenStore {
+  Future<String?> read(String key);
+  Future<void> write(String key, String value);
+  Future<void> delete(String key);
+}
+
+class SecureTokenStore implements TokenStore {
+  const SecureTokenStore([this._storage = const FlutterSecureStorage()]);
+
+  final FlutterSecureStorage _storage;
+
+  @override
+  Future<String?> read(String key) => _storage.read(key: key);
+
+  @override
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
+
+  @override
+  Future<void> delete(String key) => _storage.delete(key: key);
+}
+
+String defaultApiBaseUrl({bool? android, String? configuredUrl}) {
+  final configured =
+      configuredUrl ??
+      const String.fromEnvironment('API_BASE_URL', defaultValue: '');
+  if (configured.trim().isNotEmpty) return configured.trim();
+  return (android ?? Platform.isAndroid)
+      ? 'http://10.0.2.2:8080/api/v1'
+      : 'http://127.0.0.1:8080/api/v1';
+}
+
 class ApiClient {
-  ApiClient({Dio? dio, FlutterSecureStorage? storage})
+  ApiClient({Dio? dio, TokenStore? storage})
     : _dio =
           dio ??
           Dio(
             BaseOptions(
-              baseUrl: const String.fromEnvironment(
-                'API_BASE_URL',
-                defaultValue: 'http://127.0.0.1:8080/api/v1',
-              ),
+              baseUrl: defaultApiBaseUrl(),
               connectTimeout: const Duration(seconds: 15),
               receiveTimeout: const Duration(seconds: 120),
             ),
           ),
-      _storage = storage ?? const FlutterSecureStorage();
+      _storage = storage ?? const SecureTokenStore();
 
   final Dio _dio;
-  final FlutterSecureStorage _storage;
+  final TokenStore _storage;
   String? _accessToken;
   String? _refreshToken;
+  Future<bool>? _refreshInFlight;
 
   Future<bool> restoreSession() async {
     try {
-      _accessToken = await _storage.read(key: 'access_token');
-      _refreshToken = await _storage.read(key: 'refresh_token');
+      _accessToken = await _storage.read('access_token');
+      _refreshToken = await _storage.read('refresh_token');
       return _accessToken != null && _refreshToken != null;
     } catch (_) {
       _accessToken = null;
@@ -69,9 +99,7 @@ class ApiClient {
         );
       } catch (_) {}
     }
-    _accessToken = null;
-    _refreshToken = null;
-    await _storage.deleteAll();
+    await _clearTokens();
   }
 
   Future<List<Project>> listProjects() async {
@@ -274,15 +302,25 @@ class ApiClient {
         _dio.options.headers['authorization'] = 'Bearer $_accessToken';
         return _call(action, retryAuth: false);
       }
-      final data = error.response?.data;
-      final message = data is Map<String, dynamic>
-          ? data['message']?.toString()
-          : null;
-      throw ApiException(message ?? error.message ?? '网络请求失败');
+      throw ApiException(_errorMessage(error));
     }
   }
 
   Future<bool> _refresh() async {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) return inFlight;
+    final operation = _performRefresh();
+    _refreshInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (identical(_refreshInFlight, operation)) {
+        _refreshInFlight = null;
+      }
+    }
+  }
+
+  Future<bool> _performRefresh() async {
     final refresh = _refreshToken;
     if (refresh == null) return false;
     try {
@@ -293,7 +331,7 @@ class ApiClient {
       await _storeTokens(response.data!);
       return true;
     } catch (_) {
-      await _storage.deleteAll();
+      await _clearTokens();
       return false;
     }
   }
@@ -301,8 +339,29 @@ class ApiClient {
   Future<void> _storeTokens(Map<String, dynamic> data) async {
     _accessToken = data['access_token'] as String;
     _refreshToken = data['refresh_token'] as String;
-    await _storage.write(key: 'access_token', value: _accessToken);
-    await _storage.write(key: 'refresh_token', value: _refreshToken);
+    await _storage.write('access_token', _accessToken!);
+    await _storage.write('refresh_token', _refreshToken!);
+  }
+
+  Future<void> _clearTokens() async {
+    _accessToken = null;
+    _refreshToken = null;
+    _dio.options.headers.remove('authorization');
+    await Future.wait([
+      _storage.delete('access_token'),
+      _storage.delete('refresh_token'),
+    ]);
+  }
+
+  String _errorMessage(DioException error) {
+    final data = error.response?.data;
+    final body = data is Map ? data : const <String, dynamic>{};
+    return switch (body['code']) {
+      'unauthorized' => '用户名或密码错误，或登录已过期',
+      'conflict' => '该用户名已被使用',
+      'bad_request' => body['message']?.toString() ?? '请检查输入内容',
+      _ => body['message']?.toString() ?? error.message ?? '网络请求失败',
+    };
   }
 
   DioMediaType _mediaType(String? extension) => switch (extension

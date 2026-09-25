@@ -6,10 +6,12 @@
 
 ```bash
 flutter pub get
-flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8080/api/v1
+flutter run
 ```
 
-Android 模拟器访问宿主机时使用 `http://10.0.2.2:8080/api/v1`。真机应使用局域网地址或 HTTPS 公网域名。
+未指定 `API_BASE_URL` 时，Android 模拟器自动使用 `http://10.0.2.2:8080/api/v1`，iOS Simulator 和桌面调试使用 `http://127.0.0.1:8080/api/v1`。真机应通过 `--dart-define=API_BASE_URL=...` 指定局域网地址或 HTTPS 公网域名。
+
+macOS 上的 CocoaPods 1.16.2 会将工作路径中的全角括号错误归一化为半角括号。若 `pod install` 误报找不到已存在的 `Podfile`，请将仓库克隆到不含全角括号的路径（如 `~/Projects/speechmirror`）后再构建 iOS 工程。
 
 ## 验证与构建
 

@@ -21,8 +21,12 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
     _reload();
   }
 
-  void _reload() =>
-      setState(() => _projects = ref.read(apiClientProvider).listProjects());
+  void _reload() {
+    final projects = ref.read(apiClientProvider).listProjects();
+    setState(() {
+      _projects = projects;
+    });
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(

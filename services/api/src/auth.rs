@@ -63,9 +63,9 @@ pub fn validate_credentials(username: &str, password: &str) -> ApiResult<()> {
             "username must be 3-32 ASCII letters, numbers, underscores or hyphens".into(),
         ));
     }
-    if password.chars().count() < 8 {
+    if !(8..=128).contains(&password.chars().count()) {
         return Err(ApiError::BadRequest(
-            "password must contain at least 8 characters".into(),
+            "password must contain 8-128 characters".into(),
         ));
     }
     Ok(())

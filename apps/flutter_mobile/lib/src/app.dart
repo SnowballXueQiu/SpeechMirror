@@ -12,7 +12,7 @@ import 'screens/training_screen.dart';
 import 'theme.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final auth = ref.watch(authControllerProvider);
+  final auth = ref.read(authControllerProvider);
   return GoRouter(
     initialLocation: '/projects',
     refreshListenable: auth,

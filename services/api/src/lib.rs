@@ -233,6 +233,93 @@ mod tests {
         assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
     }
 
+    #[tokio::test]
+    async fn authentication_validates_credentials_and_revokes_logout_token() {
+        let temp = tempdir().unwrap();
+        let router = app(Config::test(temp.path().to_owned())).await.unwrap();
+
+        let invalid_username = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"王彦翔","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(invalid_username.status(), StatusCode::BAD_REQUEST);
+
+        let oversized_password = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"valid_user","password":"x".repeat(129)}),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(oversized_password.status(), StatusCode::BAD_REQUEST);
+
+        let registered = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"valid_user","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(registered.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&registered.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let access_token = body["access_token"].as_str().unwrap();
+        let refresh_token = body["refresh_token"].as_str().unwrap();
+
+        let duplicate = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"valid_user","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+
+        let wrong_password = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/login",
+                json!({"username":"valid_user","password":"wrong-password"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(wrong_password.status(), StatusCode::UNAUTHORIZED);
+
+        let logout = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/logout",
+                json!({"refresh_token":refresh_token}),
+                Some(access_token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(logout.status(), StatusCode::OK);
+
+        let revoked = router
+            .oneshot(json_request(
+                "/api/v1/auth/refresh",
+                json!({"refresh_token":refresh_token}),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
+    }
+
     fn json_request(uri: &str, body: Value, token: Option<&str>) -> Request<Body> {
         let mut builder = Request::builder()
             .method("POST")

@@ -121,9 +121,12 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
     ),
   );
 
-  void _reload() => setState(
-    () => _report = ref.read(apiClientProvider).getReport(widget.sessionId),
-  );
+  void _reload() {
+    final report = ref.read(apiClientProvider).getReport(widget.sessionId);
+    setState(() {
+      _report = report;
+    });
+  }
 }
 
 class _SummaryBand extends StatelessWidget {
