@@ -19,11 +19,11 @@
 
 ## 02. AI 供应商配置
 
-- [x] 确定 LLM 使用 DeepSeek，默认模型配置为 `deepseek-chat`，并与其他AI能力拆分地址和密钥。
+- [x] 确定 LLM 使用 DeepSeek，VPS 实测模型为 `deepseek-flash`，并与其他AI能力拆分地址和密钥。
 - [ ] 确定 Embedding、ASR 和 OCR 的供应商与模型名。
 - [ ] 将密钥写入本地 `services/api/.env`，不提交到 Git。
 - [ ] 确认健康接口的 `providers` 字段逐项反映 LLM、Embedding、ASR 和 OCR 配置状态；四项齐备后总览字段 `ai_configured` 为 `true`。
-- [ ] 保存一次不含密钥的真实调用日志。
+- [x] 保存一次不含密钥的真实 DeepSeek 调用记录，见 `docs/evidence/ai-jury-question-generation.md`。
 
 验收证据：模型名、调用时间、HTTP 状态、脱敏响应和费用记录。
 
@@ -52,8 +52,8 @@
 
 ## 05. AI 评委闭环
 
-- [ ] 从当前项目生成技术、应用、创新、风险和质疑类问题。
-- [ ] 逐条核对 `chunk_id` 和引文确实属于当前项目。
+- [x] 从当前项目生成技术、应用、创新、风险和质疑类问题；缺失或无效类别最多定向补问两次。
+- [x] 逐条核对 `chunk_id` 和连续原文引文确实属于当前项目，真实响应见 `docs/evidence/ai-jury-question-generation.md`。
 - [ ] 完成一次文本回答和一次语音回答。
 - [ ] 检查评价、改进建议和连续追问。
 
