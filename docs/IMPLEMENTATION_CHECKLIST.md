@@ -20,7 +20,7 @@
 ## 02. AI 供应商配置
 
 - [x] 确定 LLM 使用 DeepSeek，VPS 实测模型为 `deepseek-flash`，并与其他AI能力拆分地址和密钥。
-- [ ] Embedding 已确定并实测阿里云百炼 `qwen3.7-text-embedding-flash`；ASR 和 OCR 仍需分别实测后确定。
+- [ ] Embedding 已实测 `qwen3.7-text-embedding-flash`，ASR 已实测 `qwen3-asr-flash-2026-02-10`；OCR 仍需单独实测后确定。
 - [ ] 将密钥写入本地 `services/api/.env`，不提交到 Git。
 - [ ] 确认健康接口的 `providers` 字段逐项反映 LLM、Embedding、ASR 和 OCR 配置状态；四项齐备后总览字段 `ai_configured` 为 `true`。
 - [x] 保存一次不含密钥的真实 DeepSeek 调用记录，见 `docs/evidence/ai-jury-question-generation.md`。
@@ -43,7 +43,7 @@
 - [x] 在 Android 15 模拟器完成 28 秒真实录制，确认音频、视频与恢复清单均写入应用沙箱。
 - [x] 确认原始视频只保存在手机本地，服务端存储目录没有 MP4/MOV 文件。
 - [x] 完成训练历史与趋势页面；无真实报告时仅显示训练记录和明确空态，不生成示例分数。
-- [ ] 上传音频并获得真实 ASR 转写。
+- [x] 通过训练音频接口上传 7.55 秒合成中文语音，获得真实 ASR 转写并写回训练记录；真机 5 分钟录音仍由本节第一项单独验收。
 - [ ] 生成报告，核对语速、停顿、口头禅、时长和材料证据。
 - [ ] 获得至少两份真实报告后，核对时长偏差、口头禅频率、内容和问答四条趋势。
 - [x] 音频提交失败后强制结束并冷启动应用，确认本地视频不丢失、待分析状态自动恢复并可重试。
