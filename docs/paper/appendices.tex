@@ -82,12 +82,10 @@ make render
 \path{STORAGE_DIR} & 材料、临时音频与中间文件目录 \\
 \path{JWT_SECRET} & JWT签名密钥，最少32个字符 \\
 \path{CORS_ALLOWED_ORIGINS} & 允许的浏览器HTTPS来源白名单 \\
-\path{AI_BASE_URL} & 兼容OpenAI协议的国产AI服务基址 \\
-\path{AI_API_KEY} & 服务端供应商凭据 \\
-\path{LLM_MODEL} & 问题生成、报告和回答评价模型名 \\
-\path{EMBEDDING_MODEL} & 材料片段与查询向量化模型名 \\
-\path{ASR_MODEL} & 训练与评委回答语音识别模型名 \\
-\path{OCR_MODEL} & 扫描页面与图片文字识别模型名 \\
+\path{LLM_BASE_URL} / \path{LLM_API_KEY} / \path{LLM_MODEL} & DeepSeek语言模型地址、凭据与模型名 \\
+\path{EMBEDDING_BASE_URL} / \path{EMBEDDING_API_KEY} / \path{EMBEDDING_MODEL} & 材料片段与查询向量化服务配置 \\
+\path{ASR_BASE_URL} / \path{ASR_API_KEY} / \path{ASR_MODEL} & 训练与评委回答语音识别服务配置 \\
+\path{OCR_BASE_URL} / \path{OCR_API_KEY} / \path{OCR_MODEL} & 扫描页面与图片文字识别服务配置 \\
 \bottomrule
 \end{longtable}
 

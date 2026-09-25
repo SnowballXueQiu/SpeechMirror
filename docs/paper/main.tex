@@ -98,19 +98,19 @@
 \addcontentsline{toc}{chapter}{摘要}
 大学生在答辩准备过程中通常能够修改文稿，却难以在缺少实验室、固定评委和专用设备的条件下持续获得结构化反馈。本文设计并实现一个面向个人训练的多端AI答辩教练SpeechMirror。系统以用户上传的论文、演示文稿、文档、文本和图片为知识边界，通过材料解析、光学字符识别、分块检索和大语言模型生成评委问题；通过移动端本地视频录制、临时音频识别和端侧派生视觉指标形成内容、表达、时间、视觉与问答五类报告。内容评价必须回链材料片段，避免用不可解释的总分替代证据。
 
-系统采用Flutter构建iOS与Android客户端，使用ArkTS与ArkUI构建HarmonyOS 6原生客户端，后端采用Rust、Axum、SeaORM与SQLite WAL。端侧推理核心以C++稳定ABI封装，并预留MindSpore Lite接入。原始视频不离开终端，音频临时上传后删除，服务端只长期保存转写、报告与结构化指标。HarmonyOS实现用于验证核心能力在我国自主移动操作系统生态中的迁移与适配，降低单一平台依赖，而不作无法证实的知识产权归属表述。
+系统采用Flutter构建iOS与Android客户端，使用ArkTS与ArkUI构建HarmonyOS 6原生客户端，后端采用Rust、Axum、SeaORM与SQLite WAL。语言模型层默认接入DeepSeek，通过独立Provider配置与向量、语音识别和OCR能力解耦。端侧指标核心以C++稳定ABI封装，原始视频不离开终端，音频临时上传后删除，服务端只长期保存转写、报告与结构化指标。
 
-工程实现覆盖账号、项目、五类材料入口、持久化任务队列、知识库、训练会话、语音识别接口、可解释报告、AI评委、历史趋势、Flutter工作流、HarmonyOS原生工程、容器化部署与论文构建链。系统对未获得的端侧指标使用空值表达，并对供应商不可用、输出不合规和网络失败设置显式错误路径，不以伪造分析结果覆盖失败。
+项目将国产开放模型生态与HarmonyOS原生适配作为两项相互支撑的技术选择：云侧以可替换的DeepSeek接口处理材料约束下的语言理解，端侧面向我国自主移动操作系统生态建立原生交互与数据最小化边界，降低对单一模型供应商和单一移动平台的依赖。工程实现覆盖账号、项目、五类材料入口、持久化任务队列、知识库、训练会话、语音识别接口、可解释报告、AI评委、历史趋势、Flutter工作流、HarmonyOS原生工程、容器化部署与论文构建链。系统对未获得的端侧指标使用空值表达，并对供应商不可用、输出不合规和网络失败设置显式错误路径，不以伪造分析结果覆盖失败。
 
-\noindent\textbf{关键词：}答辩训练；检索增强生成；端云协同；HarmonyOS；隐私保护；可解释反馈
+\noindent\textbf{关键词：}答辩训练；DeepSeek；检索增强生成；HarmonyOS；端云协同；可解释反馈
 
 \chapter*{Abstract}
 \addcontentsline{toc}{chapter}{Abstract}
 SpeechMirror is a personal AI-assisted defense rehearsal system for university students. It grounds questions and content feedback in user-provided papers, slides, documents, text, and images. Mobile clients keep raw video on device, temporarily upload audio for speech recognition, and submit only derived visual metrics. The server combines material ingestion, retrieval, transcription, explainable reporting, and jury-style follow-up questions through provider-neutral interfaces.
 
-The implementation uses Flutter for iOS and Android, native ArkTS and ArkUI for HarmonyOS 6, and Rust with Axum, SeaORM, and SQLite WAL for the backend. A shared C++ ABI defines observable edge metrics and a MindSpore Lite adapter boundary. The HarmonyOS client is treated as a native portability and privacy target rather than a web wrapper. Unavailable dimensions remain nullable, and provider or validation failures are surfaced explicitly instead of being replaced with fabricated scores.
+The implementation uses Flutter for iOS and Android, native ArkTS and ArkUI for HarmonyOS 6, and Rust with Axum, SeaORM, and SQLite WAL for the backend. DeepSeek is the default language-model provider and is configured independently from embedding, speech recognition, and OCR services. A shared C++ ABI defines observable edge metrics. The HarmonyOS client is treated as a native portability and privacy target rather than a web wrapper. Together, the replaceable domestic model interface and native HarmonyOS adaptation reduce dependence on a single model vendor or mobile platform. Unavailable dimensions remain nullable, and provider or validation failures are surfaced explicitly instead of being replaced with fabricated scores.
 
-\noindent\textbf{Keywords:} defense rehearsal; retrieval-augmented generation; edge-cloud collaboration; HarmonyOS; privacy; explainable feedback
+\noindent\textbf{Keywords:} defense rehearsal; DeepSeek; retrieval-augmented generation; HarmonyOS; edge-cloud collaboration; explainable feedback
 
 \tableofcontents
 \mainmatter
