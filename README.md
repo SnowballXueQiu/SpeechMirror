@@ -32,6 +32,16 @@ flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8080/api/v1
 
 Android 模拟器访问宿主机时应把地址改为 `http://10.0.2.2:8080/api/v1`。真机必须使用局域网或 HTTPS 公网地址。
 
+## Docker 部署
+
+`infra/docker-compose.yml` 默认将 API 发布到宿主机回环地址 `127.0.0.1:48180`，避免未配置域名与 HTTPS 时意外暴露公网。临时远程调试可在 `infra/.env` 中显式设置 `API_PUBLISH_HOST=0.0.0.0` 与未占用的 `API_PORT`；正式部署应配置 `DOMAIN` 并通过 Caddy 提供 HTTPS。
+
+```bash
+cd infra
+docker compose up -d --build api
+curl http://127.0.0.1:48180/api/v1/health
+```
+
 ## 验证命令
 
 ```bash
