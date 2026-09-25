@@ -583,7 +583,7 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         character_count,
         characters_per_minute,
         filler_counts,
-        long_pause_count: 0,
+        long_pause_count: None,
         content,
         delivery: DimensionReport {
             score: Some(delivery_score),

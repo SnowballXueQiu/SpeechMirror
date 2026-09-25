@@ -23,6 +23,7 @@ struct ReportPage {
         Row() {
           Column({ space: 4 }) { Text('语速').fontSize(11).fontColor('#AAAAAA'); Text(`${Math.round(this.report.characters_per_minute)} 字/分`).fontSize(19).fontWeight(FontWeight.Bold).fontColor(Color.White) }.layoutWeight(1)
           Column({ space: 4 }) { Text('时长').fontSize(11).fontColor('#AAAAAA'); Text(`${this.report.actual_seconds} 秒`).fontSize(19).fontWeight(FontWeight.Bold).fontColor(Color.White) }.layoutWeight(1)
+          Column({ space: 4 }) { Text('长停顿').fontSize(11).fontColor('#AAAAAA'); Text(this.report.long_pause_count === null || this.report.long_pause_count === undefined ? '未计算' : `${this.report.long_pause_count} 次`).fontSize(19).fontWeight(FontWeight.Bold).fontColor(Color.White) }.layoutWeight(1)
         }.padding(18).width('100%').margin({ top: 18 }).backgroundColor('#18211D').borderRadius(7)
         Text('五维分析').fontSize(19).fontWeight(FontWeight.Bold).margin({ top: 28, bottom: 8 }).width('100%')
         this.scoreRow('内容', this.report.content)

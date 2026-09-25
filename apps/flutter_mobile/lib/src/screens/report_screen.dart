@@ -166,6 +166,14 @@ class _SummaryBand extends StatelessWidget {
             unit: '次',
           ),
         ),
+        Container(width: 1, height: 44, color: Colors.white24),
+        Expanded(
+          child: _Metric(
+            label: '长停顿',
+            value: report.longPauseCount?.toString() ?? '--',
+            unit: report.longPauseCount == null ? '未计算' : '次',
+          ),
+        ),
       ],
     ),
   );

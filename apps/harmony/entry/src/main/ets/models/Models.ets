@@ -28,6 +28,7 @@ export interface ReportPayload {
   session_id: string;
   actual_seconds: number;
   characters_per_minute: number;
+  long_pause_count?: number | null;
   content: DimensionReport;
   delivery: DimensionReport;
   timing: DimensionReport;

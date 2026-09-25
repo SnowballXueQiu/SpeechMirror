@@ -184,6 +184,7 @@ class RehearsalReport {
     required this.characterCount,
     required this.charactersPerMinute,
     required this.fillerCounts,
+    this.longPauseCount,
     required this.content,
     required this.delivery,
     required this.timing,
@@ -198,6 +199,7 @@ class RehearsalReport {
   final int characterCount;
   final double charactersPerMinute;
   final Map<String, int> fillerCounts;
+  final int? longPauseCount;
   final DimensionReport content;
   final DimensionReport delivery;
   final DimensionReport timing;
@@ -217,6 +219,7 @@ class RehearsalReport {
           (json['characters_per_minute'] as num?)?.toDouble() ?? 0,
       fillerCounts: (json['filler_counts'] as Map<String, dynamic>? ?? const {})
           .map((key, value) => MapEntry(key, (value as num).toInt())),
+      longPauseCount: (json['long_pause_count'] as num?)?.toInt(),
       content: DimensionReport.fromJson(
         json['content'] as Map<String, dynamic>,
       ),

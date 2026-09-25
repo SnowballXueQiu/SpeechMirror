@@ -169,7 +169,7 @@ pub struct ReportPayload {
     pub character_count: usize,
     pub characters_per_minute: f64,
     pub filler_counts: BTreeMap<String, usize>,
-    pub long_pause_count: usize,
+    pub long_pause_count: Option<usize>,
     pub content: DimensionReport,
     pub delivery: DimensionReport,
     pub timing: DimensionReport,

@@ -10,6 +10,7 @@ void main() {
         'character_count': 900,
         'characters_per_minute': 180.0,
         'filler_counts': {'然后': 2},
+        'long_pause_count': null,
         'content': {
           'score': 82,
           'summary': '覆盖了技术路线',
@@ -29,6 +30,7 @@ void main() {
 
     expect(report.sessionId, 'session-1');
     expect(report.fillerCounts['然后'], 2);
+    expect(report.longPauseCount, isNull);
     expect(report.content.evidence.single.chunkId, 'chunk-1');
     expect(report.visual.score, isNull);
     expect(report.qa.score, isNull);
