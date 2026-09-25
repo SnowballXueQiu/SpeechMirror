@@ -24,20 +24,24 @@
 \graphicspath{{figures/}{../../apps/flutter_mobile/test/goldens/}}
 
 \setmainfont{Times New Roman}
-\IfFontExistsTF{FangSong_GB2312}{
-  \setCJKmainfont{FangSong_GB2312}[AutoFakeBold=2]
-  \newCJKfontfamily\FangSongFont{FangSong_GB2312}
+\IfFileExists{fonts/FangSong_GB2312.ttf}{
+  \setCJKmainfont{FangSong_GB2312.ttf}[Path=fonts/,AutoFakeBold=2]
+  \newCJKfontfamily\FangSongFont{FangSong_GB2312.ttf}[Path=fonts/]
 }{
   \setCJKmainfont{STFangsong}[AutoFakeBold=2]
   \newCJKfontfamily\FangSongFont{STFangsong}
 }
-\IfFontExistsTF{FZXiaoBiaoSong-B05S}{
-  \newCJKfontfamily\TitleFont{FZXiaoBiaoSong-B05S}[AutoFakeBold=2]
+\IfFileExists{fonts/FZXiaoBiaoSong.ttf}{
+  \newCJKfontfamily\TitleFont{FZXiaoBiaoSong.ttf}[Path=fonts/,AutoFakeBold=2]
 }{
   \newCJKfontfamily\TitleFont{Songti SC}[AutoFakeBold=2]
 }
 \newCJKfontfamily\HeiFont{Heiti SC}
-\newCJKfontfamily\KaiFont{KaiTi}
+\IfFileExists{fonts/KaiTi_GB2312.ttf}{
+  \newCJKfontfamily\KaiFont{KaiTi_GB2312.ttf}[Path=fonts/]
+}{
+  \newCJKfontfamily\KaiFont{KaiTi}
+}
 \newCJKfontfamily\SongFont{Songti SC}
 
 \definecolor{ink}{HTML}{18211D}
