@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use reqwest::multipart::{Form, Part};
 use serde_json::{Value, json};
 
 use crate::{
@@ -122,24 +121,34 @@ impl AiClient {
     pub async fn transcribe_audio(&self, path: &Path, filename: &str) -> ApiResult<String> {
         let provider = &self.config.asr;
         let bytes = tokio::fs::read(path).await?;
-        let part = Part::bytes(bytes).file_name(filename.to_owned());
-        let form = Form::new()
-            .text("model", provider.model.clone())
-            .text("language", "zh")
-            .part("file", part);
+        let (media_type, format) = audio_input_metadata(&bytes, filename)?;
+        let data_url = format!("data:{media_type};base64,{}", STANDARD.encode(bytes));
         let response = self
             .http
-            .post(self.endpoint(provider, "audio/transcriptions"))
+            .post(self.endpoint(provider, "chat/completions"))
             .bearer_auth(self.api_key(provider)?)
-            .multipart(form)
+            .json(&json!({
+                "model": provider.model,
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_audio",
+                        "input_audio": {"data": data_url, "format": format}
+                    }]
+                }]
+            }))
             .send()
             .await
             .map_err(internal)?;
         let body = checked_json(response).await?;
-        body.get("text")
+        body.pointer("/choices/0/message/content")
             .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
             .map(str::to_owned)
-            .ok_or_else(|| ApiError::Internal("ASR response did not contain text".into()))
+            .ok_or_else(|| {
+                ApiError::Internal("ASR response did not contain transcript text".into())
+            })
     }
 
     pub async fn ocr_image(&self, path: &Path, media_type: &str) -> ApiResult<String> {
@@ -169,6 +178,37 @@ impl AiClient {
     }
 }
 
+fn audio_input_metadata(bytes: &[u8], filename: &str) -> ApiResult<(&'static str, &'static str)> {
+    if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WAVE" {
+        return Ok(("audio/wav", "wav"));
+    }
+    if bytes.len() >= 8 && &bytes[4..8] == b"ftyp" {
+        return Ok(("audio/mp4", "m4a"));
+    }
+    if bytes.starts_with(b"ID3")
+        || (bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] & 0xe0 == 0xe0)
+    {
+        let extension = Path::new(filename)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        return if extension.eq_ignore_ascii_case("aac") {
+            Ok(("audio/aac", "aac"))
+        } else {
+            Ok(("audio/mpeg", "mp3"))
+        };
+    }
+    if bytes.starts_with(b"fLaC") {
+        return Ok(("audio/flac", "flac"));
+    }
+    if bytes.starts_with(b"OggS") {
+        return Ok(("audio/ogg", "ogg"));
+    }
+    Err(ApiError::BadRequest(
+        "audio must be a WAV, M4A, MP3, AAC, FLAC, or OGG file".into(),
+    ))
+}
+
 fn internal(error: reqwest::Error) -> ApiError {
     ApiError::Internal(format!("AI provider request failed: {error}"))
 }
@@ -194,4 +234,42 @@ fn parse_json_content(content: &str) -> ApiResult<Value> {
         .unwrap_or(trimmed)
         .trim();
     serde_json::from_str(without_fence).map_err(ApiError::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_audio_container_from_bytes() {
+        let wav = b"RIFF\x00\x00\x00\x00WAVEfmt ";
+        let m4a = b"\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00";
+        let mp3 = b"ID3\x04\x00\x00";
+
+        assert_eq!(
+            audio_input_metadata(wav, "wrong.m4a").unwrap(),
+            ("audio/wav", "wav")
+        );
+        assert_eq!(
+            audio_input_metadata(m4a, "audio.m4a").unwrap(),
+            ("audio/mp4", "m4a")
+        );
+        assert_eq!(
+            audio_input_metadata(mp3, "audio.mp3").unwrap(),
+            ("audio/mpeg", "mp3")
+        );
+        assert!(audio_input_metadata(b"plain text", "audio.m4a").is_err());
+    }
+
+    #[test]
+    fn parses_json_with_or_without_markdown_fence() {
+        assert_eq!(
+            parse_json_content("{\"ok\":true}").unwrap(),
+            json!({"ok": true})
+        );
+        assert_eq!(
+            parse_json_content("```json\n{\"ok\":true}\n```").unwrap(),
+            json!({"ok": true})
+        );
+    }
 }

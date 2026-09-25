@@ -71,7 +71,7 @@ impl Config {
                 asr: provider_from_env(
                     "ASR",
                     "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    "paraformer-v2",
+                    "qwen3-asr-flash-2026-02-10",
                 ),
                 ocr: provider_from_env(
                     "OCR",

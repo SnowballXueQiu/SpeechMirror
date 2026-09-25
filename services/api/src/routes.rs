@@ -587,6 +587,14 @@ async fn transcribe_uploaded_audio(
     }
     let (_filename, data) =
         upload.ok_or_else(|| ApiError::BadRequest("multipart field 'file' is required".into()))?;
+    if data.is_empty() {
+        return Err(ApiError::BadRequest("uploaded audio is empty".into()));
+    }
+    if data.len() > MAX_AUDIO_BYTES {
+        return Err(ApiError::BadRequest(
+            "audio exceeds the 30 MiB upload limit".into(),
+        ));
+    }
     let temp_dir = state.config.storage_dir.join("tmp");
     tokio::fs::create_dir_all(&temp_dir).await?;
     let job_id = Uuid::new_v4().to_string();
@@ -1104,6 +1112,7 @@ fn safe_filename(input: &str) -> String {
 }
 
 const MAX_DOCUMENT_BYTES: usize = 25 * 1024 * 1024;
+const MAX_AUDIO_BYTES: usize = 30 * 1024 * 1024;
 
 fn validate_document_upload(
     filename: &str,
