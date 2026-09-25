@@ -51,3 +51,5 @@ docs/paper/*.out
 docs/paper/*.run.xml
 docs/paper/*.toc
 docs/paper/*.xdv
+docs/paper/fonts/*
+!docs/paper/fonts/README.md

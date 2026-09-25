@@ -24,11 +24,20 @@
 \graphicspath{{figures/}{../../apps/flutter_mobile/test/goldens/}}
 
 \setmainfont{Times New Roman}
-\setCJKmainfont{STFangsong}[AutoFakeBold=2]
-\newCJKfontfamily\TitleFont{Songti SC}[AutoFakeBold=2]
+\IfFontExistsTF{FangSong_GB2312}{
+  \setCJKmainfont{FangSong_GB2312}[AutoFakeBold=2]
+  \newCJKfontfamily\FangSongFont{FangSong_GB2312}
+}{
+  \setCJKmainfont{STFangsong}[AutoFakeBold=2]
+  \newCJKfontfamily\FangSongFont{STFangsong}
+}
+\IfFontExistsTF{FZXiaoBiaoSong-B05S}{
+  \newCJKfontfamily\TitleFont{FZXiaoBiaoSong-B05S}[AutoFakeBold=2]
+}{
+  \newCJKfontfamily\TitleFont{Songti SC}[AutoFakeBold=2]
+}
 \newCJKfontfamily\HeiFont{Heiti SC}
 \newCJKfontfamily\KaiFont{KaiTi}
-\newCJKfontfamily\FangSongFont{STFangsong}
 \newCJKfontfamily\SongFont{Songti SC}
 
 \definecolor{ink}{HTML}{18211D}
