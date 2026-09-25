@@ -6,7 +6,7 @@
 
 - [x] 推送仓库基线到 GitHub `main` 分支。
 - [x] 使用 Xcode/iOS Simulator 构建并启动 Flutter 登录页。
-- [ ] 在 Android Emulator 中安装当前 APK，启动登录页并保存截图。
+- [x] 在 Android Emulator 中安装当前 APK，启动登录页并保存截图。
 - [ ] 安装 DevEco Studio 和 HarmonyOS 6 SDK，完成 SDK License 与模拟器配置。
 - [ ] 用 DevEco Studio 导入 `apps/harmony`，修正 SDK 版本与签名配置，生成第一个 HAP。
 

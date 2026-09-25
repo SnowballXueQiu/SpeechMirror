@@ -171,7 +171,21 @@ Flutter工程由主题、模型、API客户端、认证控制器、路由和页�
 \section{报告与评委页面}
 报告页展示语速、时长、口头禅、五维条形、材料引文、建议和时间定位。评委页可以生成问题、输入文本或录制语音回答，并展示相关性、准确性、建议和追问。对没有采样值的维度，接口使用null表达，界面显示“—”并说明本次训练未采集该数据，不把缺失数据画成零分。
 
-\begin{figure}[H]\centering\includegraphics[width=0.46\textwidth]{figures/login_screen.png}\caption{iOS模拟器中的Flutter登录页实际运行截图}\end{figure}
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.42\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/login_screen.png}
+  \caption{iOS Simulator}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.42\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/android_login_screen.png}
+  \caption{Android Emulator}
+\end{subfigure}
+\caption{Flutter登录页在iOS与Android中的实际运行截图}
+\end{figure}
 
 \chapter{HarmonyOS 6原生适配与创新}
 \section{原生工程}
