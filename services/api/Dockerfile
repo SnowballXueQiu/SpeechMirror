@@ -1,5 +1,7 @@
 FROM rust:1.85-bookworm AS builder
 WORKDIR /build
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
+    CARGO_HTTP_MULTIPLEXING=false
 COPY services/api/Cargo.toml services/api/Cargo.lock ./
 COPY services/api/src ./src
 COPY openapi /openapi
