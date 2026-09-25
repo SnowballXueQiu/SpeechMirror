@@ -42,6 +42,8 @@ docker compose up -d --build api
 curl http://127.0.0.1:48180/api/v1/health
 ```
 
+后端 Dockerfile 使用 BuildKit 命名缓存保存 Cargo registry、Git 依赖和 release 编译产物。同一台构建主机首次构建完成后，后续源码更新只重新编译受影响的 crate；不要在日常部署前执行 `docker builder prune`，否则会主动清除这些缓存。
+
 ## 验证命令
 
 ```bash
