@@ -1,4 +1,4 @@
-FROM rust:1.85-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 WORKDIR /build
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
     CARGO_HTTP_MULTIPLEXING=false
