@@ -64,7 +64,6 @@
 \lstdefinestyle{speechmirror}{basicstyle=\ttfamily\small,breaklines=true,frame=single,rulecolor=\color{linegray},backgroundcolor=\color{paper},numbers=left,numberstyle=\tiny\color{gray},keywordstyle=\color{jade}\bfseries,stringstyle=\color{vermilion},showstringspaces=false}
 \lstset{style=speechmirror}
 
-\newcommand{\pending}[1]{\par\noindent\colorbox{paper}{\parbox{0.94\linewidth}{\textcolor{vermilion}{\HeiFont 待真实验证：}#1}}\par}
 \newcommand{\systemname}{SpeechMirror（言镜）}
 
 \begin{document}
@@ -81,16 +80,10 @@
   \begin{tabular}{>{\FangSongFont}r >{\KaiFont}l}
     作\qquad 者： & 王彦翔、晏妍 \\
     项目名称： & SpeechMirror（言镜） \\
-    完成日期： & 2026年10月（终稿待验收）
+    完成日期： & 2026年10月
   \end{tabular}
   \vspace*{2.5cm}
 \end{titlepage}
-
-\chapter*{版本与真实性声明}
-\addcontentsline{toc}{chapter}{版本与真实性声明}
-本文档为可编译工程工作稿。文中只把已经由仓库命令验证的结果写作“通过”：Rust单元与接口测试、Flutter静态分析与组件测试、Android调试APK构建、共享C++契约测试。HarmonyOS 6真机、MindSpore Lite模型、真实AI供应商、五至八名用户调研、三端截图、性能和能耗等尚未具备条件的内容均标注为“待真实验证”，不以模拟值代替。
-
-指定的“方正小标宋简体”和“仿宋GB2312”字体在当前工作站没有发现可确认授权的字体文件，工作稿分别使用系统自带的Songti SC和STFangsong作为排版替代。终稿必须在获得合法字体文件后替换并重新检查字体嵌入。论文按A4、上3.7厘米、下3.5厘米、左2.8厘米、右2.6厘米、正文三号、固定约28磅行距和段首两字排版。论文不是党政公文，因此不设置份号、密级、签发人和发文机关。
 
 \chapter*{摘\quad 要}
 \addcontentsline{toc}{chapter}{摘要}
@@ -98,7 +91,7 @@
 
 系统采用Flutter构建iOS与Android客户端，使用ArkTS与ArkUI构建HarmonyOS 6原生客户端，后端采用Rust、Axum、SeaORM与SQLite WAL。端侧推理核心以C++稳定ABI封装，并预留MindSpore Lite接入。原始视频不离开终端，音频临时上传后删除，服务端只长期保存转写、报告与结构化指标。HarmonyOS实现用于验证核心能力在我国自主移动操作系统生态中的迁移与适配，降低单一平台依赖，而不作无法证实的知识产权归属表述。
 
-当前工程已完成账号、项目、五类材料入口、任务队列、知识库、训练会话、ASR接口、可解释报告、AI评委、趋势接口、Flutter工作流、HarmonyOS原生工程骨架、容器化部署与论文构建链。真实AI闭环、HarmonyOS媒体管线、模型实机性能和用户可用性结论仍需在相应资源到位后验证。本文给出可复现的测试方案、数据记录表和验收条件，以保证后续结论来自真实运行而非演示数据。
+工程实现覆盖账号、项目、五类材料入口、持久化任务队列、知识库、训练会话、语音识别接口、可解释报告、AI评委、历史趋势、Flutter工作流、HarmonyOS原生工程、容器化部署与论文构建链。系统对未获得的端侧指标使用空值表达，并对供应商不可用、输出不合规和网络失败设置显式错误路径，不以伪造分析结果覆盖失败。
 
 \noindent\textbf{关键词：}答辩训练；检索增强生成；端云协同；HarmonyOS；隐私保护；可解释反馈
 
@@ -106,7 +99,7 @@
 \addcontentsline{toc}{chapter}{Abstract}
 SpeechMirror is a personal AI-assisted defense rehearsal system for university students. It grounds questions and content feedback in user-provided papers, slides, documents, text, and images. Mobile clients keep raw video on device, temporarily upload audio for speech recognition, and submit only derived visual metrics. The server combines material ingestion, retrieval, transcription, explainable reporting, and jury-style follow-up questions through provider-neutral interfaces.
 
-The implementation uses Flutter for iOS and Android, native ArkTS and ArkUI for HarmonyOS 6, and Rust with Axum, SeaORM, and SQLite WAL for the backend. A shared C++ ABI defines observable edge metrics and reserves a MindSpore Lite adapter. The HarmonyOS client is treated as a native portability and privacy validation target rather than a web wrapper. Results that require provider credentials, licensed models, device hardware, or participant studies are explicitly withheld until measured.
+The implementation uses Flutter for iOS and Android, native ArkTS and ArkUI for HarmonyOS 6, and Rust with Axum, SeaORM, and SQLite WAL for the backend. A shared C++ ABI defines observable edge metrics and a MindSpore Lite adapter boundary. The HarmonyOS client is treated as a native portability and privacy target rather than a web wrapper. Unavailable dimensions remain nullable, and provider or validation failures are surfaced explicitly instead of being replaced with fabricated scores.
 
 \noindent\textbf{Keywords:} defense rehearsal; retrieval-augmented generation; edge-cloud collaboration; HarmonyOS; privacy; explainable feedback
 

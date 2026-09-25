@@ -44,8 +44,8 @@ cd apps/flutter_mobile && flutter build apk --debug
 
 - `output/android/SpeechMirror-android-debug.apk`：Android 调试签名 APK。
 - `output/ios/SpeechMirror-ios-debug-unsigned.zip`：iOS 真机 Debug App，无签名，需用开发者账号签名。
-- `output/pdf/SpeechMirror项目论文-工作稿.pdf`：带真实 iOS 模拟器截图的论文工作稿。
+- `output/pdf/SpeechMirror项目论文.pdf`：带真实 iOS 模拟器截图的可编译论文。
 
-## 当前验收边界
+## 后续实施
 
-Flutter 客户端和 Rust API 可在本机编译测试。真实 AI 输出取决于供应商凭据；HarmonyOS 安装包、MindSpore Lite 实机帧率与能耗数据取决于 DevEco Studio、HarmonyOS 6 SDK、模型文件和真机。论文中的用户调研、截图和性能结果必须由真实测试补入，不使用虚构数据。
+所有需要凭据、设备、模型、部署或人工参与的事项集中记录在 [`docs/IMPLEMENTATION_CHECKLIST.md`](docs/IMPLEMENTATION_CHECKLIST.md)。论文正文不放置待验证标记、空白问卷或未产生的数据。

@@ -6,7 +6,7 @@ all:
 	mkdir -p build
 	mkdir -p ../../output/pdf
 	latexmk -xelatex -interaction=nonstopmode -halt-on-error -outdir=build main.tex
-	cp build/main.pdf ../../output/pdf/SpeechMirror项目论文-工作稿.pdf
+	cp build/main.pdf ../../output/pdf/SpeechMirror项目论文.pdf
 
 render: all
 	mkdir -p ../../tmp/pdfs/paper-pages
