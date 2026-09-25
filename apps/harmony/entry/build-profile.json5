@@ -1,0 +1,13 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "arkOptions": { "obfuscation": { "ruleOptions": { "enable": false, "files": [] }, "consumerFiles": [] } },
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "arguments": "-DOHOS_STL=c++_shared",
+      "abiFilters": ["arm64-v8a"]
+    }
+  },
+  "buildOptionSet": [{ "name": "release", "arkOptions": { "obfuscation": { "ruleOptions": { "enable": true, "files": ["./obfuscation-rules.txt"] } } } }],
+  "targets": [{ "name": "default" }]
+}

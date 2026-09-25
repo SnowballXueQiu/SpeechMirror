@@ -1,0 +1,135 @@
+\chapter{接口摘要}
+\begin{longtable}{>{\raggedright\arraybackslash}p{4.5cm}>{\raggedright\arraybackslash}p{2.7cm}p{6.8cm}}
+\toprule 路径 & 方法 & 用途 \\
+\midrule
+\endfirsthead
+\toprule 路径 & 方法 & 用途 \\
+\midrule
+\endhead
+/auth/register & POST & 注册并签发令牌 \\
+/auth/login & POST & 登录并签发令牌 \\
+/auth/refresh & POST & 轮换刷新令牌 \\
+/projects & GET/POST & 项目列表与创建 \\
+/projects/\{id\} & GET/\allowbreak PUT/\allowbreak DELETE & 项目读取、更新和彻底删除 \\
+/projects/\{id\}/\allowbreak documents & GET/\allowbreak POST & 材料列表与上传 \\
+/documents/\{id\}/\allowbreak text & PUT & 纠正并重新索引文本 \\
+/projects/\{id\}/\allowbreak sessions & GET/\allowbreak POST & 训练历史与创建 \\
+/sessions/\{id\}/\allowbreak metrics & POST & 上传端侧派生指标 \\
+/sessions/\{id\}/\allowbreak audio & POST & 临时音频ASR \\
+/sessions/\{id\}/\allowbreak answer-audio & POST & 回答音频临时转写，不覆盖训练转写 \\
+/sessions/\{id\}/\allowbreak complete & POST & 完成训练 \\
+/sessions/\{id\}/\allowbreak analyze & POST & 生成报告 \\
+/sessions/\{id\}/\allowbreak report & GET & 读取报告 \\
+/projects/\{id\}/\allowbreak questions & GET/\allowbreak POST & 问题列表与生成 \\
+/questions/\{id\}/\allowbreak answers & POST & 提交回答并评价 \\
+/projects/\{id\}/\allowbreak trends & GET & 历史趋势 \\
+\bottomrule
+\end{longtable}
+
+完整机器可读契约见仓库\texttt{openapi/openapi.yaml}。
+
+\chapter{测试用例清单}
+\begin{longtable}{p{2.1cm}p{3.7cm}p{4.8cm}p{3.5cm}}
+\toprule 编号 & 前置条件 & 操作 & 预期 \\
+\midrule
+\endfirsthead
+\toprule 编号 & 前置条件 & 操作 & 预期 \\
+\midrule
+\endhead
+AUTH-01 & 新用户名 & 注册合法账号 & 返回15分钟访问令牌与30天刷新令牌 \\
+AUTH-02 & 已注册账号 & 错误密码登录 & 返回401且不泄露账号存在性 \\
+AUTH-03 & 有效刷新令牌 & 连续刷新两次旧令牌 & 第一次成功，旧令牌第二次失败 \\
+DOC-01 & 已登录 & 上传文本PDF & 状态最终为ready并产生片段 \\
+DOC-02 & 已登录且配置OCR & 上传扫描PDF & OCR文本可查看与纠正 \\
+DOC-03 & LibreOffice可用 & 上传PPTX与DOCX & 转换并进入同一PDF流程 \\
+DOC-04 & 不支持格式 & 上传可执行文件 & 返回400且不落盘 \\
+REC-01 & 前置摄像头可用 & 连续录制5分钟 & 本地视频可播放且界面流畅 \\
+REC-02 & 录制结束时断网 & 停止并分析 & 本地视频保留，可重试 \\
+ASR-01 & AI凭据有效 & 上传普通话音频 & 返回真实转写并删除临时音频 \\
+RPT-01 & 会话有转写 & 生成报告 & 五维结构完整，内容含材料证据 \\
+RPT-02 & 无视觉样本 & 生成报告 & 明确未采集，不伪造高分 \\
+JURY-01 & 项目有ready材料 & 生成5个问题 & 覆盖多类别且证据属于当前项目 \\
+JURY-02 & 已生成问题 & 提交无依据回答 & 评价指出依据不足并给出追问 \\
+DEL-01 & 项目有全量数据 & 删除项目 & 数据库级联且文档文件删除 \\
+HAR-01 & HarmonyOS 6真机 & 安装并登录 & 与Flutter端看到相同项目 \\
+HAR-02 & MindSpore模型有效 & 录制并抽帧 & 达到目标FPS且不阻塞录制 \\
+\bottomrule
+\end{longtable}
+
+\chapter{用户访谈与可用性记录表}
+\section{基本信息}
+参与者编号：\underline{\hspace{4cm}}\quad 日期：\underline{\hspace{4cm}}
+
+近期答辩类型：\underline{\hspace{10cm}}
+
+常用手机系统及版本：\underline{\hspace{8cm}}
+
+\section{任务记录}
+\begin{longtable}{p{4.0cm}p{2.5cm}p{2.5cm}p{5.0cm}}
+\toprule 任务 & 是否完成 & 用时 & 观察与错误 \\
+\midrule
+注册或登录 & & & \\
+创建项目 & & & \\
+上传并检查材料 & & & \\
+完成三分钟训练 & & & \\
+定位一条报告证据 & & & \\
+回答两个评委问题 & & & \\
+删除测试项目 & & & \\
+\bottomrule
+\end{longtable}
+
+\section{访谈记录}
+最有价值的信息：\vspace{3cm}
+
+最难理解的信息：\vspace{3cm}
+
+隐私说明是否清晰：\vspace{3cm}
+
+希望删除或增加的功能：\vspace{3cm}
+
+\chapter{真机性能记录表}
+\begin{longtable}{p{2.8cm}p{3.5cm}p{3.5cm}p{4.0cm}}
+\toprule 项目 & iOS & Android & HarmonyOS 6 \\
+\midrule
+设备型号 & 待测 & 待测 & 待测 \\
+系统版本 & 待测 & 待测 & 待测 \\
+构建版本 & 待测 & 待测 & 待测 \\
+录制时长 & 待测 & 待测 & 待测 \\
+平均抽帧FPS & 待测 & 待测 & 待测 \\
+P95推理延迟 & 待测 & 待测 & 待测 \\
+峰值内存 & 待测 & 待测 & 待测 \\
+十五分钟温升 & 待测 & 待测 & 待测 \\
+电量变化 & 待测 & 待测 & 待测 \\
+异常与日志编号 & 待测 & 待测 & 待测 \\
+\bottomrule
+\end{longtable}
+
+\chapter{关键配置说明}
+\begin{lstlisting}[language=bash,caption={后端环境变量样例}]
+BIND_ADDR=0.0.0.0:8080
+DATABASE_URL=sqlite://data/speechmirror.sqlite3?mode=rwc
+STORAGE_DIR=data
+JWT_SECRET=<32 bytes or longer random secret>
+CORS_ALLOWED_ORIGINS=https://<browser-origin.example>
+AI_BASE_URL=https://<provider>/compatible-mode/v1
+AI_API_KEY=<secret>
+LLM_MODEL=<verified model>
+EMBEDDING_MODEL=<verified embedding model>
+ASR_MODEL=<verified ASR model>
+OCR_MODEL=<verified vision/OCR model>
+\end{lstlisting}
+
+密钥不得写入论文、截图、Git仓库或客户端。生产环境配置变化需要记录日期和操作者；模型变更后重新执行材料检索、问答和报告回归测试。
+
+\chapter{论文终稿检查表}
+\begin{enumerate}
+  \item 页数是否为95至105页，且没有重复内容、无意义大图或空白凑页。
+  \item 标题、正文、一至四级标题、数字英文、行距、页边距和段首缩进是否符合要求。
+  \item 方正小标宋简体和仿宋GB2312是否来自合法授权文件并嵌入PDF。
+  \item 单页页码是否居右空一字、双页页码是否居左空一字。
+  \item 目录、书签、图表编号、交叉引用和GB/T 7714-2015参考文献是否正确。
+  \item 三端截图是否来自实际应用并隐藏账号、令牌、密钥与个人材料。
+  \item 所有调研数字能否回到匿名原始记录，所有性能数字能否回到日志。
+  \item HarmonyOS 6创新表述是否聚焦原生适配、端云协同和国产生态，不作产权误述。
+  \item 全部页面渲染为PNG后是否无重叠、缺字、裁切、黑块和模糊图片。
+\end{enumerate}

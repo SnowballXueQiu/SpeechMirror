@@ -1,0 +1,50 @@
+.DS_Store
+.idea/
+.vscode/
+*.log
+.env
+data/
+output/
+tmp/
+
+# Rust
+services/api/target/
+
+# Flutter / Dart
+apps/flutter_mobile/.dart_tool/
+apps/flutter_mobile/.flutter-plugins
+apps/flutter_mobile/.flutter-plugins-dependencies
+apps/flutter_mobile/.packages
+apps/flutter_mobile/build/
+apps/flutter_mobile/coverage/
+apps/flutter_mobile/android/.gradle/
+apps/flutter_mobile/android/local.properties
+apps/flutter_mobile/ios/Pods/
+apps/flutter_mobile/ios/.symlinks/
+apps/flutter_mobile/ios/Flutter/ephemeral/
+apps/flutter_mobile/ios/Flutter/Generated.xcconfig
+apps/flutter_mobile/ios/Flutter/flutter_export_environment.sh
+
+# HarmonyOS / DevEco
+apps/harmony/.hvigor/
+apps/harmony/**/build/
+apps/harmony/local.properties
+
+# Native CMake
+native/edge_vision/build/
+
+# LaTeX
+docs/paper/build/
+docs/paper/*.aux
+docs/paper/*.bbl
+docs/paper/*.bcf
+docs/paper/*.blg
+docs/paper/*.fdb_latexmk
+docs/paper/*.fls
+docs/paper/*.lof
+docs/paper/*.log
+docs/paper/*.lot
+docs/paper/*.out
+docs/paper/*.run.xml
+docs/paper/*.toc
+docs/paper/*.xdv

@@ -1,0 +1,9 @@
+{
+  "string": [
+    { "name": "app_name", "value": "言镜" },
+    { "name": "module_desc", "value": "AI答辩训练" },
+    { "name": "entry_desc", "value": "言镜主入口" },
+    { "name": "camera_reason", "value": "用于录制仅保存在本机的模拟答辩视频" },
+    { "name": "microphone_reason", "value": "用于答辩语音识别和报告生成" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "SpeechMirror entry HAP",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}

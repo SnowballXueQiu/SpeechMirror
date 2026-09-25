@@ -1,0 +1,119 @@
+% !TeX program = xelatex
+\documentclass[UTF8,zihao=-4,openany,twoside]{ctexbook}
+\usepackage[a4paper,top=3.7cm,bottom=3.5cm,left=2.8cm,right=2.6cm,headheight=18pt,headsep=12pt,footskip=22pt]{geometry}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{pdfpages}
+\usepackage[backend=biber,style=gb7714-2015,gbnamefmt=lowercase]{biblatex}
+
+\addbibresource{references.bib}
+\graphicspath{{figures/}{../../apps/flutter_mobile/test/goldens/}}
+
+\setmainfont{Times New Roman}
+\setCJKmainfont{STFangsong}[AutoFakeBold=2]
+\newCJKfontfamily\TitleFont{Songti SC}[AutoFakeBold=2]
+\newCJKfontfamily\HeiFont{Heiti SC}
+\newCJKfontfamily\KaiFont{KaiTi}
+\newCJKfontfamily\FangSongFont{STFangsong}
+\newCJKfontfamily\SongFont{Songti SC}
+
+\definecolor{ink}{HTML}{18211D}
+\definecolor{jade}{HTML}{176B5B}
+\definecolor{vermilion}{HTML}{C8573B}
+\definecolor{paper}{HTML}{F4F1E8}
+\definecolor{linegray}{HTML}{D4CEC0}
+
+\hypersetup{colorlinks=true,linkcolor=ink,citecolor=jade,urlcolor=jade,pdftitle={面向多端协同的AI答辩训练系统SpeechMirror的设计与实现},pdfauthor={王彦翔、晏妍},bookmarksnumbered=true}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0pt}
+\setlength{\tabcolsep}{3pt}
+\setlength{\emergencystretch}{3em}
+\linespread{1.75}\selectfont
+\setlist{nosep,leftmargin=2em}
+\captionsetup{font={small},labelfont={bf},skip=8pt}
+
+\ctexset{
+  chapter={name={},number=\chinese{chapter}、,format=\HeiFont\zihao{3},beforeskip=0pt,afterskip=18pt,fixskip=true},
+  section={name={},number=（\chinese{section}）,format=\KaiFont\zihao{3},beforeskip=16pt,afterskip=8pt,fixskip=true},
+  subsection={name={},number=\arabic{subsection}.,format=\FangSongFont\bfseries\zihao{3},beforeskip=12pt,afterskip=6pt,fixskip=true},
+  subsubsection={name={},number=(\arabic{subsubsection}),format=\FangSongFont\zihao{3},beforeskip=10pt,afterskip=4pt,fixskip=true}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[RO]{\SongFont\fontsize{14pt}{14pt}\selectfont\thepage\hspace{1em}}
+\fancyfoot[LE]{\hspace{1em}\SongFont\fontsize{14pt}{14pt}\selectfont\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[RO]{\SongFont\fontsize{14pt}{14pt}\selectfont\thepage\hspace{1em}}\fancyfoot[LE]{\hspace{1em}\SongFont\fontsize{14pt}{14pt}\selectfont\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+\lstdefinestyle{speechmirror}{basicstyle=\ttfamily\small,breaklines=true,frame=single,rulecolor=\color{linegray},backgroundcolor=\color{paper},numbers=left,numberstyle=\tiny\color{gray},keywordstyle=\color{jade}\bfseries,stringstyle=\color{vermilion},showstringspaces=false}
+\lstset{style=speechmirror}
+
+\newcommand{\pending}[1]{\par\noindent\colorbox{paper}{\parbox{0.94\linewidth}{\textcolor{vermilion}{\HeiFont 待真实验证：}#1}}\par}
+\newcommand{\systemname}{SpeechMirror（言镜）}
+
+\begin{document}
+\zihao{3}
+\frontmatter
+\begin{titlepage}
+  \thispagestyle{empty}
+  \centering
+  \vspace*{2.5cm}
+  {\TitleFont\fontsize{22pt}{35pt}\selectfont 面向多端协同的AI答辩训练系统\\[0.45em]SpeechMirror的设计与实现\par}
+  \vspace{2.2cm}
+  {\HeiFont\zihao{3} 2026年华北五省（市、自治区）及港澳台\\大学生计算机应用大赛项目论文\par}
+  \vfill
+  \begin{tabular}{>{\FangSongFont}r >{\KaiFont}l}
+    作\qquad 者： & 王彦翔、晏妍 \\
+    项目名称： & SpeechMirror（言镜） \\
+    完成日期： & 2026年10月（终稿待验收）
+  \end{tabular}
+  \vspace*{2.5cm}
+\end{titlepage}
+
+\chapter*{版本与真实性声明}
+\addcontentsline{toc}{chapter}{版本与真实性声明}
+本文档为可编译工程工作稿。文中只把已经由仓库命令验证的结果写作“通过”：Rust单元与接口测试、Flutter静态分析与组件测试、Android调试APK构建、共享C++契约测试。HarmonyOS 6真机、MindSpore Lite模型、真实AI供应商、五至八名用户调研、三端截图、性能和能耗等尚未具备条件的内容均标注为“待真实验证”，不以模拟值代替。
+
+指定的“方正小标宋简体”和“仿宋GB2312”字体在当前工作站没有发现可确认授权的字体文件，工作稿分别使用系统自带的Songti SC和STFangsong作为排版替代。终稿必须在获得合法字体文件后替换并重新检查字体嵌入。论文按A4、上3.7厘米、下3.5厘米、左2.8厘米、右2.6厘米、正文三号、固定约28磅行距和段首两字排版。论文不是党政公文，因此不设置份号、密级、签发人和发文机关。
+
+\chapter*{摘\quad 要}
+\addcontentsline{toc}{chapter}{摘要}
+大学生在答辩准备过程中通常能够修改文稿，却难以在缺少实验室、固定评委和专用设备的条件下持续获得结构化反馈。本文设计并实现一个面向个人训练的多端AI答辩教练SpeechMirror。系统以用户上传的论文、演示文稿、文档、文本和图片为知识边界，通过材料解析、光学字符识别、分块检索和大语言模型生成评委问题；通过移动端本地视频录制、临时音频识别和端侧派生视觉指标形成内容、表达、时间、视觉与问答五类报告。内容评价必须回链材料片段，避免用不可解释的总分替代证据。
+
+系统采用Flutter构建iOS与Android客户端，使用ArkTS与ArkUI构建HarmonyOS 6原生客户端，后端采用Rust、Axum、SeaORM与SQLite WAL。端侧推理核心以C++稳定ABI封装，并预留MindSpore Lite接入。原始视频不离开终端，音频临时上传后删除，服务端只长期保存转写、报告与结构化指标。HarmonyOS实现用于验证核心能力在我国自主移动操作系统生态中的迁移与适配，降低单一平台依赖，而不作无法证实的知识产权归属表述。
+
+当前工程已完成账号、项目、五类材料入口、任务队列、知识库、训练会话、ASR接口、可解释报告、AI评委、趋势接口、Flutter工作流、HarmonyOS原生工程骨架、容器化部署与论文构建链。真实AI闭环、HarmonyOS媒体管线、模型实机性能和用户可用性结论仍需在相应资源到位后验证。本文给出可复现的测试方案、数据记录表和验收条件，以保证后续结论来自真实运行而非演示数据。
+
+\noindent\textbf{关键词：}答辩训练；检索增强生成；端云协同；HarmonyOS；隐私保护；可解释反馈
+
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+SpeechMirror is a personal AI-assisted defense rehearsal system for university students. It grounds questions and content feedback in user-provided papers, slides, documents, text, and images. Mobile clients keep raw video on device, temporarily upload audio for speech recognition, and submit only derived visual metrics. The server combines material ingestion, retrieval, transcription, explainable reporting, and jury-style follow-up questions through provider-neutral interfaces.
+
+The implementation uses Flutter for iOS and Android, native ArkTS and ArkUI for HarmonyOS 6, and Rust with Axum, SeaORM, and SQLite WAL for the backend. A shared C++ ABI defines observable edge metrics and reserves a MindSpore Lite adapter. The HarmonyOS client is treated as a native portability and privacy validation target rather than a web wrapper. Results that require provider credentials, licensed models, device hardware, or participant studies are explicitly withheld until measured.
+
+\noindent\textbf{Keywords:} defense rehearsal; retrieval-augmented generation; edge-cloud collaboration; HarmonyOS; privacy; explainable feedback
+
+\tableofcontents
+\mainmatter
+\input{content}
+\printbibliography[heading=bibintoc,title={参考文献}]
+\appendix
+\input{appendices}
+\end{document}

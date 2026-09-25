@@ -1,0 +1,204 @@
+openapi: 3.1.0
+info:
+  title: SpeechMirror API
+  version: 0.1.0
+  description: 言镜三端客户端共同使用的接口契约。
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      operationId: health
+      security: []
+      responses:
+        '200': {description: 服务状态, content: {application/json: {schema: {$ref: '#/components/schemas/Health'}}}}
+  /auth/register:
+    post:
+      operationId: register
+      security: []
+      requestBody: {$ref: '#/components/requestBodies/Credentials'}
+      responses:
+        '200': {$ref: '#/components/responses/Tokens'}
+  /auth/login:
+    post:
+      operationId: login
+      security: []
+      requestBody: {$ref: '#/components/requestBodies/Credentials'}
+      responses:
+        '200': {$ref: '#/components/responses/Tokens'}
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      security: []
+      requestBody: {$ref: '#/components/requestBodies/RefreshToken'}
+      responses:
+        '200': {$ref: '#/components/responses/Tokens'}
+  /auth/logout:
+    post:
+      operationId: logout
+      requestBody: {$ref: '#/components/requestBodies/RefreshToken'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+  /projects:
+    get:
+      operationId: listProjects
+      responses:
+        '200': {description: 项目列表, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Project'}}}}}
+    post:
+      operationId: createProject
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectInput'}}}}
+      responses:
+        '200': {$ref: '#/components/responses/Project'}
+  /projects/{project_id}:
+    parameters: [{$ref: '#/components/parameters/ProjectId'}]
+    get:
+      operationId: getProject
+      responses:
+        '200': {$ref: '#/components/responses/Project'}
+    put:
+      operationId: updateProject
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPatch'}}}}
+      responses:
+        '200': {$ref: '#/components/responses/Project'}
+    delete:
+      operationId: deleteProject
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+  /projects/{project_id}/documents:
+    parameters: [{$ref: '#/components/parameters/ProjectId'}]
+    get:
+      operationId: listDocuments
+      responses:
+        '200': {description: 材料列表, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Document'}}}}}
+    post:
+      operationId: uploadDocument
+      requestBody: {$ref: '#/components/requestBodies/FileUpload'}
+      responses:
+        '200': {description: 已持久化并排队处理, content: {application/json: {schema: {$ref: '#/components/schemas/Document'}}}}
+  /documents/{document_id}/text:
+    put:
+      operationId: correctDocumentText
+      parameters: [{name: document_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [text], properties: {text: {type: string}}}}}
+      responses:
+        '200': {description: 已重新索引, content: {application/json: {schema: {$ref: '#/components/schemas/Document'}}}}
+  /projects/{project_id}/sessions:
+    parameters: [{$ref: '#/components/parameters/ProjectId'}]
+    get:
+      operationId: listSessions
+      responses:
+        '200': {description: 训练记录, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Session'}}}}}
+    post:
+      operationId: createSession
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SessionInput'}}}}
+      responses:
+        '200': {$ref: '#/components/responses/Session'}
+  /sessions/{session_id}:
+    get:
+      operationId: getSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses:
+        '200': {$ref: '#/components/responses/Session'}
+  /sessions/{session_id}/metrics:
+    post:
+      operationId: uploadMetrics
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [samples], properties: {samples: {type: array, maxItems: 20000, items: {$ref: '#/components/schemas/MetricSample'}}}}}}}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+  /sessions/{session_id}/audio:
+    post:
+      operationId: uploadAudio
+      description: 音频仅用于 ASR，处理后删除临时文件。
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      requestBody: {$ref: '#/components/requestBodies/FileUpload'}
+      responses:
+        '200': {description: 识别结果, content: {application/json: {schema: {type: object, required: [transcript], properties: {transcript: {type: string}}}}}}
+  /sessions/{session_id}/answer-audio:
+    post:
+      operationId: transcribeAnswerAudio
+      description: 评委回答音频仅用于临时转写，不覆盖训练会话转写，处理后删除临时文件。
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      requestBody: {$ref: '#/components/requestBodies/FileUpload'}
+      responses:
+        '200': {description: 识别结果, content: {application/json: {schema: {type: object, required: [transcript], properties: {transcript: {type: string}}}}}}
+  /sessions/{session_id}/complete:
+    post:
+      operationId: completeSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CompleteSession'}}}}
+      responses:
+        '200': {$ref: '#/components/responses/Session'}
+  /sessions/{session_id}/analyze:
+    post:
+      operationId: analyzeSession
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses:
+        '200': {$ref: '#/components/responses/Report'}
+  /sessions/{session_id}/report:
+    get:
+      operationId: getReport
+      parameters: [{$ref: '#/components/parameters/SessionId'}]
+      responses:
+        '200': {$ref: '#/components/responses/Report'}
+  /projects/{project_id}/questions:
+    parameters: [{$ref: '#/components/parameters/ProjectId'}]
+    get:
+      operationId: listQuestions
+      responses:
+        '200': {description: 问题列表, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Question'}}}}}
+    post:
+      operationId: generateQuestions
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {session_id: {type: [string, 'null'], format: uuid}, count: {type: integer, minimum: 1, maximum: 10, default: 5}}}}}}
+      responses:
+        '200': {description: 材料约束的问题, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Question'}}}}}
+  /questions/{question_id}/answers:
+    post:
+      operationId: submitAnswer
+      parameters: [{name: question_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [session_id, answer_text], properties: {session_id: {type: string, format: uuid}, answer_text: {type: string}}}}}}
+      responses:
+        '200': {description: 基于材料的回答评价, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+  /projects/{project_id}/trends:
+    get:
+      operationId: getTrends
+      parameters: [{$ref: '#/components/parameters/ProjectId'}]
+      responses:
+        '200': {description: 历史趋势, content: {application/json: {schema: {$ref: '#/components/schemas/Trends'}}}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    ProjectId: {name: project_id, in: path, required: true, schema: {type: string, format: uuid}}
+    SessionId: {name: session_id, in: path, required: true, schema: {type: string, format: uuid}}
+  requestBodies:
+    Credentials: {required: true, content: {application/json: {schema: {type: object, required: [username, password], properties: {username: {type: string, minLength: 3, maxLength: 32}, password: {type: string, minLength: 8, format: password}}}}}}
+    RefreshToken: {required: true, content: {application/json: {schema: {type: object, required: [refresh_token], properties: {refresh_token: {type: string}}}}}}
+    FileUpload: {required: true, content: {multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: string, format: binary}}}}}}
+  responses:
+    Ok: {description: 操作成功, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {type: boolean}}}}}}
+    Tokens: {description: 访问及刷新令牌, content: {application/json: {schema: {$ref: '#/components/schemas/TokenPair'}}}}
+    Project: {description: 项目, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
+    Session: {description: 训练记录, content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}}
+    Report: {description: 可解释报告, content: {application/json: {schema: {$ref: '#/components/schemas/ReportEnvelope'}}}}
+  schemas:
+    Health: {type: object, required: [status, ai_configured], properties: {status: {type: string, const: ok}, ai_configured: {type: boolean}}}
+    TokenPair: {type: object, required: [access_token, refresh_token, token_type, expires_in], properties: {access_token: {type: string}, refresh_token: {type: string}, token_type: {type: string, const: Bearer}, expires_in: {type: integer, const: 900}}}
+    ProjectInput: {type: object, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 80}, description: {type: [string, 'null']}, defense_duration_seconds: {type: integer, minimum: 60, maximum: 1800, default: 300}}}
+    ProjectPatch: {type: object, properties: {name: {type: [string, 'null']}, description: {type: [string, 'null']}, defense_duration_seconds: {type: [integer, 'null'], minimum: 60, maximum: 1800}}}
+    Project: {allOf: [{$ref: '#/components/schemas/ProjectInput'}, {type: object, required: [id, created_at, updated_at, defense_duration_seconds], properties: {id: {type: string, format: uuid}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}]}
+    Document: {type: object, required: [id, project_id, filename, media_type, status, created_at], properties: {id: {type: string, format: uuid}, project_id: {type: string, format: uuid}, filename: {type: string}, media_type: {type: string}, status: {type: string, enum: [processing, ready, failed]}, extracted_text: {type: [string, 'null']}, error: {type: [string, 'null']}, created_at: {type: string, format: date-time}}}
+    SessionInput: {type: object, properties: {title: {type: [string, 'null']}, target_seconds: {type: [integer, 'null'], minimum: 30, maximum: 1800}, local_video_ref: {type: [string, 'null'], description: 仅限客户端本地引用}}}
+    Session: {allOf: [{$ref: '#/components/schemas/SessionInput'}, {type: object, required: [id, project_id, title, status, target_seconds, created_at], properties: {id: {type: string, format: uuid}, project_id: {type: string, format: uuid}, title: {type: string}, status: {type: string}, actual_seconds: {type: [integer, 'null']}, transcript: {type: [string, 'null']}, created_at: {type: string, format: date-time}, completed_at: {type: [string, 'null'], format: date-time}}}]}
+    MetricSample: {type: object, required: [timestamp_ms, face_detected, gaze_centered, posture_score, audio_level], properties: {timestamp_ms: {type: integer, format: int64}, face_detected: {type: boolean}, gaze_centered: {type: number, minimum: 0, maximum: 1}, posture_score: {type: number, minimum: 0, maximum: 1}, audio_level: {type: number, minimum: 0, maximum: 1}}}
+    CompleteSession: {type: object, required: [actual_seconds], properties: {actual_seconds: {type: integer, minimum: 1, maximum: 3600}, transcript: {type: [string, 'null']}}}
+    Evidence: {type: object, required: [chunk_id, quote], properties: {chunk_id: {type: string, format: uuid}, quote: {type: string}}}
+    Dimension: {type: object, required: [score, summary, evidence], properties: {score: {type: [integer, 'null'], minimum: 0, maximum: 100, description: 未采集或未完成时为null}, summary: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}}}
+    ReportEnvelope: {type: object, required: [id, session_id, report, created_at], properties: {id: {type: string, format: uuid}, session_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}, report: {type: object, additionalProperties: true}}}
+    Question: {type: object, required: [id, project_id, category, question, evidence, created_at], properties: {id: {type: string, format: uuid}, project_id: {type: string, format: uuid}, session_id: {type: [string, 'null'], format: uuid}, category: {type: string}, question: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}, created_at: {type: string, format: date-time}}}
+    Trends: {type: object, required: [project_id, points], properties: {project_id: {type: string, format: uuid}, points: {type: array, items: {type: object, additionalProperties: true}}}}
+    Error: {type: object, required: [code, message], properties: {code: {type: string}, message: {type: string}}}
