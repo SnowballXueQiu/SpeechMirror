@@ -88,7 +88,8 @@
 
 ## 09. VPS 和域名部署
 
-- [ ] 准备 VPS、域名和 DNS 解析。
+- [x] 在 `vastsea` 的 `/home/snowball_233/SpeechMirror` 部署 Axum 调试服务，使用独立端口 `48180` 并通过外部健康检查。
+- [ ] 准备域名和 DNS 解析；当前调试端口为 HTTP，不作为最终生产入口。
 - [ ] 配置生产环境变量与至少 32 字符的随机 JWT 密钥。
 - [ ] 使用 Docker Compose 启动 Axum 与 Caddy，确认 HTTPS 证书正常。
 - [ ] 配置 SQLite、材料与日志持久卷，执行一次备份和恢复。
