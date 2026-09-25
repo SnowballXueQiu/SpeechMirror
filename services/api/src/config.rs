@@ -66,7 +66,7 @@ impl Config {
                 embedding: provider_from_env(
                     "EMBEDDING",
                     "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    "text-embedding-v3",
+                    "qwen3.7-text-embedding-flash",
                 ),
                 asr: provider_from_env(
                     "ASR",

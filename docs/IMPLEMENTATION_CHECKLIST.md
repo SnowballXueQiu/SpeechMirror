@@ -20,7 +20,7 @@
 ## 02. AI 供应商配置
 
 - [x] 确定 LLM 使用 DeepSeek，VPS 实测模型为 `deepseek-flash`，并与其他AI能力拆分地址和密钥。
-- [ ] 确定 Embedding、ASR 和 OCR 的供应商与模型名。
+- [ ] Embedding 已确定并实测阿里云百炼 `qwen3.7-text-embedding-flash`；ASR 和 OCR 仍需分别实测后确定。
 - [ ] 将密钥写入本地 `services/api/.env`，不提交到 Git。
 - [ ] 确认健康接口的 `providers` 字段逐项反映 LLM、Embedding、ASR 和 OCR 配置状态；四项齐备后总览字段 `ai_configured` 为 `true`。
 - [x] 保存一次不含密钥的真实 DeepSeek 调用记录，见 `docs/evidence/ai-jury-question-generation.md`。
@@ -32,7 +32,7 @@
 - [x] 分别准备 PDF、PPTX、DOCX、TXT/Markdown 和 PNG/JPEG 样本。
 - [x] 上传每类材料，确认状态由 `processing` 转为 `ready`。
 - [x] 检查提取文本和分块数量是否落库；当前 6 份材料各生成 1 个文本分块。
-- [ ] 配置 Embedding 供应商后验证向量生成、落库和项目内相似度检索；当前健康接口明确显示 `ai_configured: false`，数据库中 6 个分块均无向量。
+- [x] 使用阿里云百炼 `qwen3.7-text-embedding-flash` 验证向量生成、SQLite 落库和项目内相似度检索，见 `docs/evidence/embedding-retrieval.md`。
 - [x] 使用扫描 PDF 和图片检查 OCR，完成一次文本纠正与重新索引。
 
 验收证据：材料列表截图、提取文本、数据库片段记录和处理日志。
