@@ -51,3 +51,14 @@
 - 自动化验证：Flutter 11 项测试全部通过，`flutter analyze` 无问题。
 - 构建验证：Android Debug APK SHA-256 为 `6c0d1e66b39f410c5e5dda1a384cd2866807554ba2d22b255f7f6138e5a5d2d2`；iOS Simulator Debug ZIP SHA-256 为 `4056437f77c92a8d4d5ce4354962c1fb5cd887b74dc85e570c16397d1ad24d2d`。
 - 界面证据：[录制中](android-training-recording.png)、[提交失败后保留](android-training-pending.png)、[冷启动后恢复](android-training-recovered.png)。
+
+## 2026-09-25 Android 训练历史与趋势空态
+
+- 环境：Android 15 / API 35 模拟器 `SpeechMirror_QA`，连接本地 Axum API 与 SQLite 调试库。
+- 真实数据：当前项目有 2 条状态为 `recording` 的服务端训练记录，没有持久化训练报告；页面显示 2 次训练、0 次完成、0 份可比较报告。
+- 界面核验：四个趋势维度均不填充示例数据，明确显示“暂无可比较报告”；两条训练记录显示服务端已有的创建时间和“尚无时长”。
+- 接口实现：趋势点只从已经持久化的报告生成，包含时长偏差、每分钟口头禅次数、内容分和问答分；问答或视觉数据缺失时保留为空值。
+- 测试边界：指标切换、趋势图和报告跳转由合成测试夹具覆盖，不把这些测试值作为真实用户结果；真实趋势图仍需等待至少两份真实 ASR 报告。
+- 自动化验证：Rust 12 项测试和 Flutter 14 项测试全部通过，`flutter analyze` 无问题，OpenAPI YAML 可解析。
+- 构建验证：Android Debug APK SHA-256 为 `7dd9b71d336d27476ff6646e3d9d0ea56651f18a7864305b2ec29739450db069`；iOS Simulator Debug ZIP SHA-256 为 `51c5c1670a3efc8d9b2d651e85f40620676ab1cd78a84c57d6790e88ab6ddab4`。iOS 构建在不含全角括号的临时路径完成，以规避 CocoaPods 1.16.2 对当前中文项目路径执行 NFKC 规范化的问题。
+- 界面证据：[训练历史与真实空态](android-training-history-empty.png)。

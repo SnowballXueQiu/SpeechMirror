@@ -232,6 +232,13 @@ class ApiClient {
         .toList();
   }
 
+  Future<TrainingTrends> getTrends(String projectId) async {
+    final response = await _authorized(
+      () => _dio.get<Map<String, dynamic>>('/projects/$projectId/trends'),
+    );
+    return TrainingTrends.fromJson(response.data!);
+  }
+
   Future<String> uploadAudio(
     String sessionId,
     String path, {

@@ -54,6 +54,8 @@ class RehearsalSession {
     required this.targetSeconds,
     this.actualSeconds,
     this.transcript,
+    this.createdAt,
+    this.completedAt,
   });
   final String id;
   final String projectId;
@@ -62,6 +64,8 @@ class RehearsalSession {
   final int targetSeconds;
   final int? actualSeconds;
   final String? transcript;
+  final DateTime? createdAt;
+  final DateTime? completedAt;
 
   factory RehearsalSession.fromJson(Map<String, dynamic> json) =>
       RehearsalSession(
@@ -72,7 +76,74 @@ class RehearsalSession {
         targetSeconds: json['target_seconds'] as int,
         actualSeconds: json['actual_seconds'] as int?,
         transcript: json['transcript'] as String?,
+        createdAt: DateTime.tryParse(json['created_at'] as String? ?? ''),
+        completedAt: DateTime.tryParse(json['completed_at'] as String? ?? ''),
       );
+}
+
+class TrainingTrendPoint {
+  const TrainingTrendPoint({
+    required this.sessionId,
+    required this.createdAt,
+    required this.targetSeconds,
+    required this.actualSeconds,
+    required this.durationDeviationSeconds,
+    required this.charactersPerMinute,
+    required this.fillerCount,
+    required this.fillerPerMinute,
+    this.deliveryScore,
+    this.timingScore,
+    this.visualScore,
+    this.contentScore,
+    this.qaScore,
+  });
+
+  final String sessionId;
+  final DateTime createdAt;
+  final int targetSeconds;
+  final int actualSeconds;
+  final int durationDeviationSeconds;
+  final double charactersPerMinute;
+  final int fillerCount;
+  final double fillerPerMinute;
+  final int? deliveryScore;
+  final int? timingScore;
+  final int? visualScore;
+  final int? contentScore;
+  final int? qaScore;
+
+  factory TrainingTrendPoint.fromJson(Map<String, dynamic> json) =>
+      TrainingTrendPoint(
+        sessionId: json['session_id'] as String,
+        createdAt: DateTime.parse(json['created_at'] as String),
+        targetSeconds: json['target_seconds'] as int,
+        actualSeconds: json['actual_seconds'] as int,
+        durationDeviationSeconds: json['duration_deviation_seconds'] as int,
+        charactersPerMinute: (json['characters_per_minute'] as num).toDouble(),
+        fillerCount: json['filler_count'] as int,
+        fillerPerMinute: (json['filler_per_minute'] as num).toDouble(),
+        deliveryScore: json['delivery_score'] as int?,
+        timingScore: json['timing_score'] as int?,
+        visualScore: json['visual_score'] as int?,
+        contentScore: json['content_score'] as int?,
+        qaScore: json['qa_score'] as int?,
+      );
+}
+
+class TrainingTrends {
+  const TrainingTrends({required this.projectId, required this.points});
+
+  final String projectId;
+  final List<TrainingTrendPoint> points;
+
+  factory TrainingTrends.fromJson(Map<String, dynamic> json) => TrainingTrends(
+    projectId: json['project_id'] as String,
+    points: (json['points'] as List<dynamic>? ?? const [])
+        .map(
+          (item) => TrainingTrendPoint.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
+  );
 }
 
 class DimensionReport {

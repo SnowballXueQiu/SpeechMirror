@@ -66,6 +66,12 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
       title: const Text('项目训练台'),
       actions: [
         IconButton(
+          tooltip: '训练历史',
+          onPressed: () =>
+              context.push('/projects/${widget.projectId}/history'),
+          icon: const Icon(Icons.insights_outlined),
+        ),
+        IconButton(
           tooltip: '编辑项目',
           onPressed: _mutating ? null : _editProject,
           icon: const Icon(Icons.edit_outlined),

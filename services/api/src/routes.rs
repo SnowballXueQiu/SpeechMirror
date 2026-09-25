@@ -846,19 +846,46 @@ async fn get_trends(
             .await?
         {
             if let Ok(payload) = serde_json::from_value::<ReportPayload>(model.report_json) {
-                points.push(TrendPoint {
-                    session_id: session.id,
-                    created_at: model.created_at,
-                    characters_per_minute: payload.characters_per_minute,
-                    delivery_score: payload.delivery.score,
-                    timing_score: payload.timing.score,
-                    visual_score: payload.visual.score,
-                    content_score: payload.content.score,
-                });
+                points.push(build_trend_point(
+                    session.id,
+                    session.target_seconds,
+                    model.created_at,
+                    payload,
+                ));
             }
         }
     }
     Ok(Json(TrendsResponse { project_id, points }))
+}
+
+fn build_trend_point(
+    session_id: String,
+    target_seconds: i32,
+    created_at: chrono::DateTime<Utc>,
+    payload: ReportPayload,
+) -> TrendPoint {
+    let actual_seconds = payload.actual_seconds.max(0);
+    let filler_count = payload.filler_counts.values().sum();
+    let filler_per_minute = if actual_seconds == 0 {
+        0.0
+    } else {
+        filler_count as f64 * 60.0 / actual_seconds as f64
+    };
+    TrendPoint {
+        session_id,
+        created_at,
+        target_seconds,
+        actual_seconds,
+        duration_deviation_seconds: actual_seconds - target_seconds,
+        characters_per_minute: payload.characters_per_minute,
+        filler_count,
+        filler_per_minute,
+        delivery_score: payload.delivery.score,
+        timing_score: payload.timing.score,
+        visual_score: payload.visual.score,
+        content_score: payload.content.score,
+        qa_score: payload.qa.score,
+    }
 }
 
 async fn owned_project(
@@ -1034,8 +1061,18 @@ fn office_archive_contains(data: &[u8], required_entry: &str) -> bool {
 }
 
 #[cfg(test)]
-mod document_upload_tests {
+mod route_tests {
+    use std::collections::BTreeMap;
+
     use super::*;
+
+    fn dimension(score: Option<i32>) -> DimensionReport {
+        DimensionReport {
+            score,
+            summary: String::new(),
+            evidence: vec![],
+        }
+    }
 
     #[test]
     fn validates_extension_media_type_content_and_size() {
@@ -1053,5 +1090,60 @@ mod document_upload_tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn derives_trend_metrics_from_a_persisted_report() {
+        let payload = ReportPayload {
+            session_id: "session-1".into(),
+            actual_seconds: 330,
+            character_count: 900,
+            characters_per_minute: 163.6,
+            filler_counts: BTreeMap::from([("然后".into(), 2), ("嗯".into(), 1)]),
+            long_pause_count: 1,
+            content: dimension(Some(84)),
+            delivery: dimension(Some(78)),
+            timing: dimension(Some(90)),
+            visual: dimension(None),
+            qa: dimension(Some(76)),
+            timeline: vec![],
+            suggestions: vec![],
+            model_confidence: Some(0.8),
+        };
+        let point = build_trend_point("session-1".into(), 300, Utc::now(), payload);
+
+        assert_eq!(point.actual_seconds, 330);
+        assert_eq!(point.duration_deviation_seconds, 30);
+        assert_eq!(point.filler_count, 3);
+        assert!((point.filler_per_minute - 0.5454).abs() < 0.001);
+        assert_eq!(point.content_score, Some(84));
+        assert_eq!(point.qa_score, Some(76));
+        assert_eq!(point.visual_score, None);
+    }
+
+    #[test]
+    fn keeps_zero_duration_trend_finite() {
+        let payload = ReportPayload {
+            session_id: "session-2".into(),
+            actual_seconds: 0,
+            character_count: 0,
+            characters_per_minute: 0.0,
+            filler_counts: BTreeMap::from([("嗯".into(), 1)]),
+            long_pause_count: 0,
+            content: dimension(None),
+            delivery: dimension(None),
+            timing: dimension(None),
+            visual: dimension(None),
+            qa: dimension(None),
+            timeline: vec![],
+            suggestions: vec![],
+            model_confidence: None,
+        };
+        let point = build_trend_point("session-2".into(), 300, Utc::now(), payload);
+
+        assert_eq!(point.actual_seconds, 0);
+        assert_eq!(point.duration_deviation_seconds, -300);
+        assert_eq!(point.filler_per_minute, 0.0);
+        assert!(point.filler_per_minute.is_finite());
     }
 }

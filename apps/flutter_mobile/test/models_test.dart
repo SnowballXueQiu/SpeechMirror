@@ -33,4 +33,45 @@ void main() {
     expect(report.visual.score, isNull);
     expect(report.qa.score, isNull);
   });
+
+  test('parses sessions and typed trend points', () {
+    final session = RehearsalSession.fromJson({
+      'id': 'session-1',
+      'project_id': 'project-1',
+      'title': '第1次训练',
+      'status': 'completed',
+      'target_seconds': 300,
+      'actual_seconds': 318,
+      'transcript': '答辩转写',
+      'created_at': '2026-09-25T02:30:00Z',
+      'completed_at': '2026-09-25T02:36:00Z',
+    });
+    final trends = TrainingTrends.fromJson({
+      'project_id': 'project-1',
+      'points': [
+        {
+          'session_id': 'session-1',
+          'created_at': '2026-09-25T02:36:01Z',
+          'target_seconds': 300,
+          'actual_seconds': 318,
+          'duration_deviation_seconds': 18,
+          'characters_per_minute': 178.5,
+          'filler_count': 3,
+          'filler_per_minute': 0.566,
+          'delivery_score': 81,
+          'timing_score': 92,
+          'visual_score': null,
+          'content_score': 84,
+          'qa_score': null,
+        },
+      ],
+    });
+
+    expect(session.createdAt, DateTime.utc(2026, 9, 25, 2, 30));
+    expect(session.completedAt, isNotNull);
+    expect(trends.projectId, 'project-1');
+    expect(trends.points.single.durationDeviationSeconds, 18);
+    expect(trends.points.single.fillerPerMinute, closeTo(0.566, 0.0001));
+    expect(trends.points.single.qaScore, isNull);
+  });
 }

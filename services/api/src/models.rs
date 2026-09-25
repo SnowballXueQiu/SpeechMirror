@@ -221,11 +221,17 @@ pub struct AnswerResponse {
 pub struct TrendPoint {
     pub session_id: String,
     pub created_at: DateTime<Utc>,
+    pub target_seconds: i32,
+    pub actual_seconds: i32,
+    pub duration_deviation_seconds: i32,
     pub characters_per_minute: f64,
+    pub filler_count: usize,
+    pub filler_per_minute: f64,
     pub delivery_score: Option<i32>,
     pub timing_score: Option<i32>,
     pub visual_score: Option<i32>,
     pub content_score: Option<i32>,
+    pub qa_score: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

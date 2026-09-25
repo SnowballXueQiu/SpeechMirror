@@ -210,5 +210,22 @@ components:
     Dimension: {type: object, required: [score, summary, evidence], properties: {score: {type: [integer, 'null'], minimum: 0, maximum: 100, description: 未采集或未完成时为null}, summary: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}}}
     ReportEnvelope: {type: object, required: [id, session_id, report, created_at], properties: {id: {type: string, format: uuid}, session_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}, report: {type: object, additionalProperties: true}}}
     Question: {type: object, required: [id, project_id, category, question, evidence, created_at], properties: {id: {type: string, format: uuid}, project_id: {type: string, format: uuid}, session_id: {type: [string, 'null'], format: uuid}, category: {type: string}, question: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}, created_at: {type: string, format: date-time}}}
-    Trends: {type: object, required: [project_id, points], properties: {project_id: {type: string, format: uuid}, points: {type: array, items: {type: object, additionalProperties: true}}}}
+    TrendPoint:
+      type: object
+      required: [session_id, created_at, target_seconds, actual_seconds, duration_deviation_seconds, characters_per_minute, filler_count, filler_per_minute, delivery_score, timing_score, visual_score, content_score, qa_score]
+      properties:
+        session_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        target_seconds: {type: integer}
+        actual_seconds: {type: integer}
+        duration_deviation_seconds: {type: integer, description: 实际时长减目标时长，可为负数}
+        characters_per_minute: {type: number}
+        filler_count: {type: integer, minimum: 0}
+        filler_per_minute: {type: number, minimum: 0}
+        delivery_score: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        timing_score: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        visual_score: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        content_score: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        qa_score: {type: [integer, 'null'], minimum: 0, maximum: 100}
+    Trends: {type: object, required: [project_id, points], properties: {project_id: {type: string, format: uuid}, points: {type: array, items: {$ref: '#/components/schemas/TrendPoint'}}}}
     Error: {type: object, required: [code, message], properties: {code: {type: string}, message: {type: string}}}

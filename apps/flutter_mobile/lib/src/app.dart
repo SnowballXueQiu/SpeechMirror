@@ -10,6 +10,7 @@ import 'screens/project_detail_screen.dart';
 import 'screens/projects_screen.dart';
 import 'screens/report_screen.dart';
 import 'screens/training_screen.dart';
+import 'screens/training_history_screen.dart';
 import 'theme.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -44,6 +45,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/projects/:id/training',
         builder: (context, state) =>
             TrainingScreen(projectId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/projects/:id/history',
+        builder: (context, state) =>
+            TrainingHistoryScreen(projectId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: '/projects/:id/jury',
