@@ -81,7 +81,13 @@ pub fn api_router(state: AppState) -> Router {
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
-        ai_configured: state.ai.is_configured(),
+        ai_configured: state.ai.is_fully_configured(),
+        providers: AiProviderStatus {
+            llm: state.ai.is_llm_configured(),
+            embedding: state.ai.is_embedding_configured(),
+            asr: state.ai.is_asr_configured(),
+            ocr: state.ai.is_ocr_configured(),
+        },
     })
 }
 
@@ -560,7 +566,7 @@ async fn transcribe_uploaded_audio(
     answer_only: bool,
 ) -> ApiResult<Json<Value>> {
     owned_session(&state, &user.id, &session_id).await?;
-    if !state.ai.is_configured() {
+    if !state.ai.is_asr_configured() {
         return Err(ApiError::AiNotConfigured);
     }
     let mut upload: Option<(String, bytes::Bytes)> = None;
@@ -621,7 +627,7 @@ async fn analyze_session(
     Path(session_id): Path<String>,
 ) -> ApiResult<Json<ReportResponse>> {
     owned_session(&state, &user.id, &session_id).await?;
-    if !state.ai.is_configured() {
+    if !state.ai.is_llm_configured() {
         return Err(ApiError::AiNotConfigured);
     }
     let job_id = enqueue_report_generation(&state, &session_id).await?;

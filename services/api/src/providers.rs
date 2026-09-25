@@ -5,7 +5,7 @@ use reqwest::multipart::{Form, Part};
 use serde_json::{Value, json};
 
 use crate::{
-    config::AiConfig,
+    config::{AiConfig, ProviderConfig},
     error::{ApiError, ApiResult},
 };
 
@@ -26,28 +26,45 @@ impl AiClient {
         }
     }
 
-    pub fn is_configured(&self) -> bool {
-        self.config.api_key.is_some()
+    pub fn is_llm_configured(&self) -> bool {
+        self.config.llm.is_configured()
     }
 
-    fn api_key(&self) -> ApiResult<&str> {
-        self.config
-            .api_key
-            .as_deref()
-            .ok_or(ApiError::AiNotConfigured)
+    pub fn is_embedding_configured(&self) -> bool {
+        self.config.embedding.is_configured()
     }
 
-    fn endpoint(&self, suffix: &str) -> String {
-        format!("{}/{}", self.config.base_url.trim_end_matches('/'), suffix)
+    pub fn is_asr_configured(&self) -> bool {
+        self.config.asr.is_configured()
+    }
+
+    pub fn is_ocr_configured(&self) -> bool {
+        self.config.ocr.is_configured()
+    }
+
+    pub fn is_fully_configured(&self) -> bool {
+        self.is_llm_configured()
+            && self.is_embedding_configured()
+            && self.is_asr_configured()
+            && self.is_ocr_configured()
+    }
+
+    fn api_key<'a>(&self, provider: &'a ProviderConfig) -> ApiResult<&'a str> {
+        provider.api_key.as_deref().ok_or(ApiError::AiNotConfigured)
+    }
+
+    fn endpoint(&self, provider: &ProviderConfig, suffix: &str) -> String {
+        format!("{}/{}", provider.base_url.trim_end_matches('/'), suffix)
     }
 
     pub async fn chat_json(&self, system: &str, user: &str) -> ApiResult<Value> {
+        let provider = &self.config.llm;
         let response = self
             .http
-            .post(self.endpoint("chat/completions"))
-            .bearer_auth(self.api_key()?)
+            .post(self.endpoint(provider, "chat/completions"))
+            .bearer_auth(self.api_key(provider)?)
             .json(&json!({
-                "model": self.config.llm_model,
+                "model": provider.model,
                 "temperature": 0.2,
                 "response_format": {"type": "json_object"},
                 "messages": [
@@ -72,11 +89,12 @@ impl AiClient {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
+        let provider = &self.config.embedding;
         let response = self
             .http
-            .post(self.endpoint("embeddings"))
-            .bearer_auth(self.api_key()?)
-            .json(&json!({"model": self.config.embedding_model, "input": inputs}))
+            .post(self.endpoint(provider, "embeddings"))
+            .bearer_auth(self.api_key(provider)?)
+            .json(&json!({"model": provider.model, "input": inputs}))
             .send()
             .await
             .map_err(internal)?;
@@ -102,16 +120,17 @@ impl AiClient {
     }
 
     pub async fn transcribe_audio(&self, path: &Path, filename: &str) -> ApiResult<String> {
+        let provider = &self.config.asr;
         let bytes = tokio::fs::read(path).await?;
         let part = Part::bytes(bytes).file_name(filename.to_owned());
         let form = Form::new()
-            .text("model", self.config.asr_model.clone())
+            .text("model", provider.model.clone())
             .text("language", "zh")
             .part("file", part);
         let response = self
             .http
-            .post(self.endpoint("audio/transcriptions"))
-            .bearer_auth(self.api_key()?)
+            .post(self.endpoint(provider, "audio/transcriptions"))
+            .bearer_auth(self.api_key(provider)?)
             .multipart(form)
             .send()
             .await
@@ -124,13 +143,14 @@ impl AiClient {
     }
 
     pub async fn ocr_image(&self, path: &Path, media_type: &str) -> ApiResult<String> {
+        let provider = &self.config.ocr;
         let bytes = tokio::fs::read(path).await?;
         let data_url = format!("data:{media_type};base64,{}", STANDARD.encode(bytes));
         let response = self.http
-            .post(self.endpoint("chat/completions"))
-            .bearer_auth(self.api_key()?)
+            .post(self.endpoint(provider, "chat/completions"))
+            .bearer_auth(self.api_key(provider)?)
             .json(&json!({
-                "model": self.config.ocr_model,
+                "model": provider.model,
                 "temperature": 0,
                 "messages": [{
                     "role": "user",

@@ -14,7 +14,7 @@ SpeechMirror 是面向大学生答辩训练的三端应用。用户上传自己�
 
 ## 本地启动
 
-后端需要 Rust、Poppler 和 LibreOffice。Tesseract 可在未配置云端 OCR 时提供本地图片与扫描 PDF 文字提取；中文识别需安装 `chi_sim` 语言包。复制 `services/api/.env.example` 为 `.env`，至少修改 `JWT_SECRET`；真实 ASR、问题生成和报告内容评价还需要配置兼容 OpenAI API 的国产服务凭据。
+后端需要 Rust、Poppler 和 LibreOffice。Tesseract 可在未配置云端 OCR 时提供本地图片与扫描 PDF 文字提取；中文识别需安装 `chi_sim` 语言包。复制 `services/api/.env.example` 为 `.env`，至少修改 `JWT_SECRET`。LLM 默认接入 DeepSeek，Embedding、ASR 和 OCR 分别使用独立的服务地址与密钥；DeepSeek 密钥不会被用于其未提供的语音识别、OCR 或向量接口。
 若另有浏览器前端，再通过 `CORS_ALLOWED_ORIGINS` 配置逗号分隔的 HTTPS 来源；默认不允许浏览器跨域访问，iOS、Android 与 HarmonyOS 原生请求不依赖 CORS。
 
 ```bash

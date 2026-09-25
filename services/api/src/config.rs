@@ -1,13 +1,24 @@
 use std::{env, net::SocketAddr, path::PathBuf};
 
 #[derive(Clone, Debug)]
-pub struct AiConfig {
+pub struct ProviderConfig {
     pub base_url: String,
     pub api_key: Option<String>,
-    pub llm_model: String,
-    pub embedding_model: String,
-    pub asr_model: String,
-    pub ocr_model: String,
+    pub model: String,
+}
+
+impl ProviderConfig {
+    pub fn is_configured(&self) -> bool {
+        self.api_key.is_some()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AiConfig {
+    pub llm: ProviderConfig,
+    pub embedding: ProviderConfig,
+    pub asr: ProviderConfig,
+    pub ocr: ProviderConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -51,14 +62,22 @@ impl Config {
             storage_dir,
             cors_allowed_origins,
             ai: AiConfig {
-                base_url: env::var("AI_BASE_URL")
-                    .unwrap_or_else(|_| "https://dashscope.aliyuncs.com/compatible-mode/v1".into()),
-                api_key: env::var("AI_API_KEY").ok().filter(|v| !v.trim().is_empty()),
-                llm_model: env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-plus".into()),
-                embedding_model: env::var("EMBEDDING_MODEL")
-                    .unwrap_or_else(|_| "text-embedding-v3".into()),
-                asr_model: env::var("ASR_MODEL").unwrap_or_else(|_| "paraformer-v2".into()),
-                ocr_model: env::var("OCR_MODEL").unwrap_or_else(|_| "qwen-vl-plus".into()),
+                llm: provider_from_env("LLM", "https://api.deepseek.com", "deepseek-chat"),
+                embedding: provider_from_env(
+                    "EMBEDDING",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "text-embedding-v3",
+                ),
+                asr: provider_from_env(
+                    "ASR",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "paraformer-v2",
+                ),
+                ocr: provider_from_env(
+                    "OCR",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "qwen-vl-plus",
+                ),
             },
         })
     }
@@ -72,13 +91,31 @@ impl Config {
             storage_dir,
             cors_allowed_origins: Vec::new(),
             ai: AiConfig {
-                base_url: "http://127.0.0.1:9/v1".into(),
-                api_key: None,
-                llm_model: "test".into(),
-                embedding_model: "test".into(),
-                asr_model: "test".into(),
-                ocr_model: "test".into(),
+                llm: test_provider(),
+                embedding: test_provider(),
+                asr: test_provider(),
+                ocr: test_provider(),
             },
         }
+    }
+}
+
+fn provider_from_env(prefix: &str, default_base_url: &str, default_model: &str) -> ProviderConfig {
+    ProviderConfig {
+        base_url: env::var(format!("{prefix}_BASE_URL"))
+            .unwrap_or_else(|_| default_base_url.to_owned()),
+        api_key: env::var(format!("{prefix}_API_KEY"))
+            .ok()
+            .filter(|value| !value.trim().is_empty()),
+        model: env::var(format!("{prefix}_MODEL")).unwrap_or_else(|_| default_model.to_owned()),
+    }
+}
+
+#[cfg(test)]
+fn test_provider() -> ProviderConfig {
+    ProviderConfig {
+        base_url: "http://127.0.0.1:9/v1".into(),
+        api_key: None,
+        model: "test".into(),
     }
 }

@@ -196,7 +196,8 @@ components:
     Session: {description: 训练记录, content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}}
     Report: {description: 可解释报告, content: {application/json: {schema: {$ref: '#/components/schemas/ReportEnvelope'}}}}
   schemas:
-    Health: {type: object, required: [status, ai_configured], properties: {status: {type: string, const: ok}, ai_configured: {type: boolean}}}
+    Health: {type: object, required: [status, ai_configured, providers], properties: {status: {type: string, const: ok}, ai_configured: {type: boolean, description: 仅当四项AI能力均已配置时为true}, providers: {$ref: '#/components/schemas/AiProviderStatus'}}}
+    AiProviderStatus: {type: object, required: [llm, embedding, asr, ocr], properties: {llm: {type: boolean}, embedding: {type: boolean}, asr: {type: boolean}, ocr: {type: boolean}}}
     TokenPair: {type: object, required: [access_token, refresh_token, token_type, expires_in], properties: {access_token: {type: string}, refresh_token: {type: string}, token_type: {type: string, const: Bearer}, expires_in: {type: integer, const: 900}}}
     ProjectInput: {type: object, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 80}, description: {type: [string, 'null'], maxLength: 500}, defense_duration_seconds: {type: integer, minimum: 60, maximum: 1800, default: 300}}}
     ProjectPatch: {type: object, properties: {name: {type: [string, 'null'], minLength: 1, maxLength: 80}, description: {type: [string, 'null'], maxLength: 500}, defense_duration_seconds: {type: [integer, 'null'], minimum: 60, maximum: 1800}}}

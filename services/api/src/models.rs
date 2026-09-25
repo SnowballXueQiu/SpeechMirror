@@ -9,6 +9,15 @@ use utoipa::ToSchema;
 pub struct HealthResponse {
     pub status: &'static str,
     pub ai_configured: bool,
+    pub providers: AiProviderStatus,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AiProviderStatus {
+    pub llm: bool,
+    pub embedding: bool,
+    pub asr: bool,
+    pub ocr: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

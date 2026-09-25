@@ -80,7 +80,7 @@ async fn index_document_text(
         ));
     }
     let chunks = chunk_text(&text, 800, 100);
-    let embeddings = if state.ai.is_configured() {
+    let embeddings = if state.ai.is_embedding_configured() {
         state.ai.embeddings(&chunks).await?
     } else {
         vec![Vec::new(); chunks.len()]
@@ -245,7 +245,7 @@ async fn extract_pdf_with_ocr_fallback(state: &AppState, path: &Path) -> ApiResu
 }
 
 async fn extract_image_text(state: &AppState, path: &Path, media_type: &str) -> ApiResult<String> {
-    if state.ai.is_configured() {
+    if state.ai.is_ocr_configured() {
         return state.ai.ocr_image(path, media_type).await;
     }
     let tesseract = std::env::var("TESSERACT_BIN").unwrap_or_else(|_| "tesseract".into());
@@ -339,7 +339,7 @@ pub async fn retrieve_chunks(
     if chunks.is_empty() {
         return Ok(Vec::new());
     }
-    if !state.ai.is_configured() {
+    if !state.ai.is_embedding_configured() {
         return Ok(chunks.into_iter().take(limit).collect());
     }
     let query_embedding = state
