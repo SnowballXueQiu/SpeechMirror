@@ -1,4 +1,5 @@
 {
   "modelVersion": "5.0.2",
+  "dependencies": {},
   "execution": { "analyze": "normal", "daemon": true, "incremental": true, "parallel": true, "typeCheck": true }
 }

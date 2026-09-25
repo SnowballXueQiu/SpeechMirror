@@ -3,6 +3,11 @@ import { Project, DocumentItem, SessionItem, JuryQuestion, ReportPayload } from 
 
 interface TokenPair { access_token: string; refresh_token: string; }
 interface ReportEnvelope { report: ReportPayload; }
+interface LoginRequest { username: string; password: string; }
+interface CreateProjectRequest { name: string; description: string; defense_duration_seconds: number; }
+interface CreateSessionRequest { target_seconds: number; }
+interface CompleteSessionRequest { actual_seconds: number; transcript: string; }
+interface GenerateQuestionsRequest { session_id: string; count: number; }
 
 class ApiClient {
   private accessToken: string = '';
@@ -32,7 +37,8 @@ class ApiClient {
   }
 
   async login(username: string, password: string, register: boolean): Promise<void> {
-    const tokens = await this.request<TokenPair>(http.RequestMethod.POST, register ? '/auth/register' : '/auth/login', { username, password });
+    const body: LoginRequest = { username, password };
+    const tokens = await this.request<TokenPair>(http.RequestMethod.POST, register ? '/auth/register' : '/auth/login', body);
     this.accessToken = tokens.access_token;
     this.refreshToken = tokens.refresh_token;
   }
@@ -40,14 +46,17 @@ class ApiClient {
   listProjects(): Promise<Project[]> { return this.request<Project[]>(http.RequestMethod.GET, '/projects'); }
   getProject(id: string): Promise<Project> { return this.request<Project>(http.RequestMethod.GET, `/projects/${id}`); }
   createProject(name: string, description: string, seconds: number): Promise<Project> {
-    return this.request<Project>(http.RequestMethod.POST, '/projects', { name, description, defense_duration_seconds: seconds });
+    const body: CreateProjectRequest = { name, description, defense_duration_seconds: seconds };
+    return this.request<Project>(http.RequestMethod.POST, '/projects', body);
   }
   listDocuments(projectId: string): Promise<DocumentItem[]> { return this.request<DocumentItem[]>(http.RequestMethod.GET, `/projects/${projectId}/documents`); }
   createSession(projectId: string, seconds: number): Promise<SessionItem> {
-    return this.request<SessionItem>(http.RequestMethod.POST, `/projects/${projectId}/sessions`, { target_seconds: seconds });
+    const body: CreateSessionRequest = { target_seconds: seconds };
+    return this.request<SessionItem>(http.RequestMethod.POST, `/projects/${projectId}/sessions`, body);
   }
   completeSession(sessionId: string, seconds: number, transcript: string): Promise<SessionItem> {
-    return this.request<SessionItem>(http.RequestMethod.POST, `/sessions/${sessionId}/complete`, { actual_seconds: seconds, transcript });
+    const body: CompleteSessionRequest = { actual_seconds: seconds, transcript };
+    return this.request<SessionItem>(http.RequestMethod.POST, `/sessions/${sessionId}/complete`, body);
   }
   async analyzeSession(sessionId: string): Promise<ReportPayload> {
     const envelope = await this.request<ReportEnvelope>(http.RequestMethod.POST, `/sessions/${sessionId}/analyze`);
@@ -55,7 +64,8 @@ class ApiClient {
   }
   listQuestions(projectId: string): Promise<JuryQuestion[]> { return this.request<JuryQuestion[]>(http.RequestMethod.GET, `/projects/${projectId}/questions`); }
   generateQuestions(projectId: string, sessionId: string): Promise<JuryQuestion[]> {
-    return this.request<JuryQuestion[]>(http.RequestMethod.POST, `/projects/${projectId}/questions`, { session_id: sessionId, count: 5 });
+    const body: GenerateQuestionsRequest = { session_id: sessionId, count: 5 };
+    return this.request<JuryQuestion[]>(http.RequestMethod.POST, `/projects/${projectId}/questions`, body);
   }
 }
 

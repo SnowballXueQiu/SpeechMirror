@@ -2,7 +2,5 @@
   "modelVersion": "5.0.2",
   "description": "SpeechMirror HarmonyOS 6 native client",
   "dependencies": {},
-  "devDependencies": {
-    "@ohos/hvigor-ohos-plugin": "5.0.2"
-  }
+  "devDependencies": {}
 }

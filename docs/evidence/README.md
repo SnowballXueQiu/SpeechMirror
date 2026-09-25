@@ -62,3 +62,12 @@
 - 自动化验证：Rust 12 项测试和 Flutter 14 项测试全部通过，`flutter analyze` 无问题，OpenAPI YAML 可解析。
 - 构建验证：Android Debug APK SHA-256 为 `7dd9b71d336d27476ff6646e3d9d0ea56651f18a7864305b2ec29739450db069`；iOS Simulator Debug ZIP SHA-256 为 `51c5c1670a3efc8d9b2d651e85f40620676ab1cd78a84c57d6790e88ab6ddab4`。iOS 构建在不含全角括号的临时路径完成，以规避 CocoaPods 1.16.2 对当前中文项目路径执行 NFKC 规范化的问题。
 - 界面证据：[训练历史与真实空态](android-training-history-empty.png)。
+
+## 2026-09-25 HarmonyOS 6 工程导入与首个 HAP
+
+- 路径修复：仓库目录已从中文竞赛名称改为 `SpeechMirror`，消除 Hvigor 与 CocoaPods 对中文及全角字符路径的兼容问题。
+- 环境：DevEco Studio `6.0.1.251`，IDE 内置 HarmonyOS SDK `6.0.1.112`、API 21；项目 `compatibleSdkVersion` 与 `targetSdkVersion` 均为 `6.0.0(20)`。
+- IDE 核验：Ohpm Install、Build Init 与 `entry:compileNative` 均显示 successful，原生编译日志以 exit code 0 结束。
+- 构建核验：正式仓库路径下执行干净构建成功，ArkTS 生成 `ets/modules.abc`，原生层生成 `libs/arm64-v8a/libspeechmirror_edge_napi.so`。
+- 产物：`output/harmony/SpeechMirror-debug-unsigned.hap`，SHA-256 为 `54bb76862e67400a52ecffe26ca4172e64c3f9d8e38ec24dd7163b341272ae76`。
+- 未验证边界：当前 HAP 未签名；HarmonyOS 软件许可协议、模拟器镜像、设备安装与运行尚未完成，因此本记录不声称模拟器或真机运行成功。

@@ -28,6 +28,9 @@ apps/flutter_mobile/ios/Flutter/flutter_export_environment.sh
 # HarmonyOS / DevEco
 apps/harmony/.hvigor/
 apps/harmony/**/build/
+apps/harmony/**/.cxx/
+apps/harmony/.clang-tidy
+apps/harmony/.clangd
 apps/harmony/local.properties
 
 # Native CMake

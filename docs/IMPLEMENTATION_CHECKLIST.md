@@ -9,8 +9,10 @@
 - [x] 安装 Flutter 87.1 与 Dart 251.25410.28 插件，使用 Android Studio Debug 在 `SpeechMirror_QA` 模拟器启动登录页并保存截图。
 - [x] 完成注册、登录、令牌刷新、退出撤销与移动端安全存储闭环。
 - [x] 完成项目创建、读取、编辑、永久删除及返回列表刷新，并在 Android Studio 与 Xcode 中实测。
-- [ ] 安装 DevEco Studio 和 HarmonyOS 6 SDK，完成 SDK License 与模拟器配置。
-- [ ] 用 DevEco Studio 导入 `apps/harmony`，修正 SDK 版本与签名配置，生成第一个 HAP。
+- [x] 安装 DevEco Studio 6.0.1 与内置 HarmonyOS 6/API 21 SDK。
+- [x] 用 DevEco Studio 从英文仓库路径导入 `apps/harmony`，完成 IDE 同步、ArkTS/C++ 编译并生成首个未签名 HAP。
+- [ ] 由用户确认 HarmonyOS 软件许可协议，下载模拟器镜像并完成模拟器配置。
+- [ ] 配置调试签名，在模拟器或真机安装并运行 HAP。
 
 验收证据：IDE 构建日志、模拟器或真机登录页截图、安装包 SHA-256。
 
