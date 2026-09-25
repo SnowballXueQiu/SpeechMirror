@@ -173,6 +173,8 @@ impl AiClient {
         let body = checked_json(response).await?;
         body.pointer("/choices/0/message/content")
             .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
             .map(str::to_owned)
             .ok_or_else(|| ApiError::Internal("OCR response did not contain text".into()))
     }

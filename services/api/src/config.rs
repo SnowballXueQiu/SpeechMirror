@@ -76,7 +76,7 @@ impl Config {
                 ocr: provider_from_env(
                     "OCR",
                     "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    "qwen-vl-plus",
+                    "qwen3.8-omni-flash",
                 ),
             },
         })
