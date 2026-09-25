@@ -320,18 +320,23 @@ class ApiClient {
         .toList();
   }
 
-  Future<Map<String, dynamic>> submitAnswer(
+  Future<JuryAnswer> submitAnswer(
     String questionId,
     String sessionId,
-    String text,
-  ) async {
+    String text, {
+    String? parentAnswerId,
+  }) async {
     final response = await _authorized(
       () => _dio.post<Map<String, dynamic>>(
         '/questions/$questionId/answers',
-        data: {'session_id': sessionId, 'answer_text': text},
+        data: {
+          'session_id': sessionId,
+          'answer_text': text,
+          'parent_answer_id': parentAnswerId,
+        },
       ),
     );
-    return response.data!['evaluation'] as Map<String, dynamic>;
+    return JuryAnswer.fromJson(response.data!);
   }
 
   Future<Response<T>> _authorized<T>(

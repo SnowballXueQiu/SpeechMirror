@@ -214,6 +214,7 @@ pub struct QuestionResponse {
 pub struct SubmitAnswerRequest {
     pub session_id: String,
     pub answer_text: String,
+    pub parent_answer_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -221,6 +222,8 @@ pub struct AnswerResponse {
     pub id: String,
     pub question_id: String,
     pub session_id: String,
+    pub asked_question: String,
+    pub parent_answer_id: Option<String>,
     pub answer_text: String,
     pub evaluation: Value,
     pub created_at: DateTime<Utc>,

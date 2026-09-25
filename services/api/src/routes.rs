@@ -887,10 +887,40 @@ async fn submit_answer(
     if body.answer_text.trim().is_empty() {
         return Err(ApiError::BadRequest("answer cannot be empty".into()));
     }
+    let (asked_question, previous_turn) = if let Some(parent_answer_id) =
+        body.parent_answer_id.as_deref()
+    {
+        let parent = jury_answer::Entity::find_by_id(parent_answer_id)
+            .one(&state.db)
+            .await?
+            .ok_or(ApiError::NotFound)?;
+        if parent.question_id != question_id || parent.session_id != body.session_id {
+            return Err(ApiError::BadRequest(
+                "follow-up must continue the same question and session".into(),
+            ));
+        }
+        let follow_up = normalized_follow_up(&parent.evaluation_json).ok_or_else(|| {
+            ApiError::BadRequest("the referenced answer does not contain a valid follow-up".into())
+        })?;
+        let previous_question = parent
+            .evaluation_json
+            .get("asked_question")
+            .and_then(Value::as_str)
+            .unwrap_or(&question.question);
+        (
+            follow_up,
+            format!(
+                "上一轮问题：{previous_question}\n上一轮回答：{}\n",
+                parent.answer_text
+            ),
+        )
+    } else {
+        (question.question.clone(), String::new())
+    };
     let chunks = retrieve_chunks(
         &state,
         &question.project_id,
-        &format!("{} {}", question.question, body.answer_text),
+        &format!("{} {}", asked_question, body.answer_text),
         8,
     )
     .await?;
@@ -900,8 +930,8 @@ async fn submit_answer(
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = format!(
-        "问题：{}\n回答：{}\n项目材料：\n{}\n只返回JSON，字段为score(0-100)、relevance、accuracy、evidence、suggestions、follow_up。评价必须以材料为准，并指出没有依据的表述。",
-        question.question, body.answer_text, material
+        "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n项目材料：\n{}\n只返回JSON，字段为score(0-100整数)、relevance、accuracy、evidence数组、suggestions数组、follow_up。evidence每项必须含chunk_id和对应材料中的连续原文quote。follow_up必须是基于本轮回答和材料的非空中文追问。评价必须以材料为准，并指出没有依据的表述。",
+        question.question, previous_turn, asked_question, body.answer_text, material
     );
     let mut evaluation = state
         .ai
@@ -923,6 +953,18 @@ async fn submit_answer(
         .ok_or_else(|| ApiError::Internal("AI answer evaluation did not contain a score".into()))?
         .clamp(0, 100);
     evaluation_object.insert("score".into(), json!(score));
+    let follow_up = normalized_follow_up(&evaluation).ok_or_else(|| {
+        ApiError::Internal("AI answer evaluation did not contain a valid follow-up".into())
+    })?;
+    let evaluation_object = evaluation
+        .as_object_mut()
+        .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
+    evaluation_object.insert("follow_up".into(), json!(follow_up));
+    evaluation_object.insert("asked_question".into(), json!(&asked_question));
+    evaluation_object.insert(
+        "parent_answer_id".into(),
+        serde_json::to_value(&body.parent_answer_id)?,
+    );
     let model = jury_answer::ActiveModel {
         id: Set(Uuid::new_v4().to_string()),
         question_id: Set(question_id),
@@ -938,10 +980,17 @@ async fn submit_answer(
         id: model.id,
         question_id: model.question_id,
         session_id: model.session_id,
+        asked_question,
+        parent_answer_id: body.parent_answer_id,
         answer_text: model.answer_text,
         evaluation,
         created_at: model.created_at,
     }))
+}
+
+fn normalized_follow_up(evaluation: &Value) -> Option<String> {
+    let follow_up = evaluation.get("follow_up")?.as_str()?.trim();
+    (!follow_up.is_empty() && follow_up.chars().count() <= 500).then(|| follow_up.to_owned())
 }
 
 async fn get_trends(
@@ -1275,6 +1324,20 @@ mod route_tests {
             CORE_QUESTION_CATEGORIES
         );
         assert!(missing_question_categories(&plan, &ordered).is_empty());
+    }
+
+    #[test]
+    fn follow_up_requires_a_non_empty_bounded_question() {
+        assert_eq!(
+            normalized_follow_up(&json!({"follow_up":"  如何验证端侧数据没有泄露？  "})),
+            Some("如何验证端侧数据没有泄露？".into())
+        );
+        assert_eq!(normalized_follow_up(&json!({"follow_up":"  "})), None);
+        assert_eq!(normalized_follow_up(&json!({"follow_up":7})), None);
+        assert_eq!(
+            normalized_follow_up(&json!({"follow_up":"问".repeat(501)})),
+            None
+        );
     }
 
     #[test]

@@ -243,19 +243,59 @@ class JuryQuestion {
     required this.id,
     required this.category,
     required this.question,
+    this.sessionId,
     this.evidence = const [],
   });
   final String id;
   final String category;
   final String question;
+  final String? sessionId;
   final List<EvidenceRef> evidence;
 
   factory JuryQuestion.fromJson(Map<String, dynamic> json) => JuryQuestion(
     id: json['id'] as String,
     category: json['category'] as String,
     question: json['question'] as String,
+    sessionId: json['session_id'] as String?,
     evidence: (json['evidence'] as List<dynamic>? ?? const [])
         .map((item) => EvidenceRef.fromJson(item as Map<String, dynamic>))
         .toList(),
+  );
+}
+
+class JuryAnswer {
+  const JuryAnswer({
+    required this.id,
+    required this.questionId,
+    required this.sessionId,
+    required this.askedQuestion,
+    required this.answerText,
+    required this.evaluation,
+    this.parentAnswerId,
+  });
+
+  final String id;
+  final String questionId;
+  final String sessionId;
+  final String askedQuestion;
+  final String? parentAnswerId;
+  final String answerText;
+  final Map<String, dynamic> evaluation;
+
+  String? get followUp {
+    final value = (evaluation['follow_up'] as String?)?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  factory JuryAnswer.fromJson(Map<String, dynamic> json) => JuryAnswer(
+    id: json['id'] as String,
+    questionId: json['question_id'] as String,
+    sessionId: json['session_id'] as String,
+    askedQuestion: json['asked_question'] as String,
+    parentAnswerId: json['parent_answer_id'] as String?,
+    answerText: json['answer_text'] as String,
+    evaluation: Map<String, dynamic>.from(
+      json['evaluation'] as Map<String, dynamic>,
+    ),
   );
 }

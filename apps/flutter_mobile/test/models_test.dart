@@ -2,6 +2,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:speechmirror/src/models.dart';
 
 void main() {
+  test('parses the session binding on jury questions', () {
+    final question = JuryQuestion.fromJson(const {
+      'id': 'question-1',
+      'session_id': 'session-1',
+      'category': '技术',
+      'question': '如何实现端云协同？',
+      'evidence': <dynamic>[],
+    });
+
+    expect(question.sessionId, 'session-1');
+  });
+
   test('parses an evidence-linked report envelope', () {
     final report = RehearsalReport.fromJson({
       'report': {

@@ -22,10 +22,11 @@ class JuryScreen extends ConsumerStatefulWidget {
 class _JuryScreenState extends ConsumerState<JuryScreen> {
   List<JuryQuestion> _questions = const [];
   final Map<String, TextEditingController> _answers = {};
-  final Map<String, Map<String, dynamic>> _evaluations = {};
+  final Map<String, List<JuryAnswer>> _turns = {};
   final AudioRecorder _recorder = AudioRecorder();
   String? _sessionId;
   String? _recordingQuestionId;
+  String? _submittingQuestionId;
   bool _loading = true;
   bool _generating = false;
   String? _error;
@@ -58,7 +59,11 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     }
   }
 
-  Future<String> _ensureSession() async {
+  Future<String> _ensureSession([String? questionSessionId]) async {
+    if (questionSessionId != null) {
+      _sessionId = questionSessionId;
+      return questionSessionId;
+    }
     if (_sessionId != null) return _sessionId!;
     final project = await ref
         .read(apiClientProvider)
@@ -103,17 +108,33 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       return;
     }
     setState(() {
-      _evaluations.remove(question.id);
+      _submittingQuestionId = question.id;
       _error = null;
     });
     try {
-      final session = await _ensureSession();
-      final evaluation = await ref
+      final session = await _ensureSession(question.sessionId);
+      final questionTurns = _turns[question.id] ?? const <JuryAnswer>[];
+      final parentAnswerId = questionTurns.isEmpty
+          ? null
+          : questionTurns.last.id;
+      final result = await ref
           .read(apiClientProvider)
-          .submitAnswer(question.id, session, answer);
-      if (mounted) setState(() => _evaluations[question.id] = evaluation);
+          .submitAnswer(
+            question.id,
+            session,
+            answer,
+            parentAnswerId: parentAnswerId,
+          );
+      if (mounted) {
+        setState(() {
+          _turns[question.id] = [...questionTurns, result];
+          _controller(question.id).clear();
+        });
+      }
     } catch (error) {
       if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _submittingQuestionId = null);
     }
   }
 
@@ -123,7 +144,7 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       setState(() => _recordingQuestionId = null);
       if (path == null) return;
       try {
-        final session = await _ensureSession();
+        final session = await _ensureSession(question.sessionId);
         final transcript = await ref
             .read(apiClientProvider)
             .uploadAudio(session, path, answerOnly: true);
@@ -208,8 +229,9 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                     index: i + 1,
                     question: _questions[i],
                     controller: _controller(_questions[i].id),
-                    evaluation: _evaluations[_questions[i].id],
+                    turns: _turns[_questions[i].id] ?? const [],
                     recording: _recordingQuestionId == _questions[i].id,
+                    submitting: _submittingQuestionId == _questions[i].id,
                     onVoice: () => _toggleVoice(_questions[i]),
                     onSubmit: () => _submit(_questions[i]),
                   ),
@@ -225,16 +247,18 @@ class _QuestionPanel extends StatelessWidget {
     required this.index,
     required this.question,
     required this.controller,
-    required this.evaluation,
+    required this.turns,
     required this.recording,
+    required this.submitting,
     required this.onVoice,
     required this.onSubmit,
   });
   final int index;
   final JuryQuestion question;
   final TextEditingController controller;
-  final Map<String, dynamic>? evaluation;
+  final List<JuryAnswer> turns;
   final bool recording;
+  final bool submitting;
   final VoidCallback onVoice;
   final VoidCallback onSubmit;
 
@@ -289,27 +313,58 @@ class _QuestionPanel extends StatelessWidget {
               style: const TextStyle(color: AppColors.muted, fontSize: 12),
             ),
           ],
+          for (var i = 0; i < turns.length; i++) ...[
+            const Divider(height: 28),
+            Text(
+              '第${i + 1}轮 · ${turns[i].askedQuestion}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text('你的回答：${turns[i].answerText}'),
+            const SizedBox(height: 10),
+            _EvaluationView(data: turns[i].evaluation),
+          ],
           const SizedBox(height: 14),
+          if (turns.isNotEmpty && turns.last.followUp != null) ...[
+            Text(
+              '当前追问：${turns.last.followUp}',
+              style: const TextStyle(
+                color: AppColors.vermilion,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           TextField(
             controller: controller,
             minLines: 3,
             maxLines: 7,
-            decoration: const InputDecoration(hintText: '组织你的回答……'),
+            decoration: InputDecoration(
+              hintText: turns.isEmpty ? '组织你的回答……' : '回答当前追问……',
+            ),
           ),
           const SizedBox(height: 10),
           Row(
             children: [
               IconButton.filledTonal(
                 tooltip: recording ? '停止录音并转写' : '用语音回答',
-                onPressed: onVoice,
+                onPressed: submitting ? null : onVoice,
                 icon: Icon(recording ? Icons.stop : Icons.mic_none),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: onSubmit,
-                  icon: const Icon(Icons.fact_check_outlined),
-                  label: const Text('提交评议'),
+                  onPressed: submitting ? null : onSubmit,
+                  icon: submitting
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.fact_check_outlined),
+                  label: Text(turns.isEmpty ? '提交评议' : '回答追问'),
                 ),
               ),
             ],
@@ -320,10 +375,6 @@ class _QuestionPanel extends StatelessWidget {
               '正在录音，再次点按停止并进行真实语音识别。',
               style: TextStyle(color: AppColors.vermilion, fontSize: 12),
             ),
-          ],
-          if (evaluation != null) ...[
-            const Divider(height: 30),
-            _EvaluationView(data: evaluation!),
           ],
         ],
       ),
@@ -361,16 +412,6 @@ class _EvaluationView extends StatelessWidget {
         if (suggestion != null) ...[
           const SizedBox(height: 7),
           Text('建议：${suggestion is List ? suggestion.join('；') : suggestion}'),
-        ],
-        if (data['follow_up'] != null) ...[
-          const SizedBox(height: 9),
-          Text(
-            '追问：${data['follow_up']}',
-            style: const TextStyle(
-              color: AppColors.vermilion,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
         ],
       ],
     );

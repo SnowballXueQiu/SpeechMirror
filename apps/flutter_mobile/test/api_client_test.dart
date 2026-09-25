@@ -159,6 +159,57 @@ void main() {
       expect(deleted, isTrue);
     },
   );
+
+  test('submits a follow-up answer with its parent turn', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://speechmirror.test/api/v1'));
+    final storage = MemoryTokenStore({
+      'access_token': 'valid-access',
+      'refresh_token': 'valid-refresh',
+    });
+    Map<String, dynamic>? requestBody;
+
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          requestBody = Map<String, dynamic>.from(options.data as Map);
+          handler.resolve(
+            Response<Map<String, dynamic>>(
+              requestOptions: options,
+              statusCode: 200,
+              data: const {
+                'id': 'answer-2',
+                'question_id': 'question-1',
+                'session_id': 'session-1',
+                'asked_question': '如何验证隐私设计？',
+                'parent_answer_id': 'answer-1',
+                'answer_text': '通过检查服务端不保存原始视频。',
+                'evaluation': {'score': 88, 'follow_up': '临时音频如何清理？'},
+                'created_at': '2026-09-26T00:00:00Z',
+              },
+            ),
+          );
+        },
+      ),
+    );
+
+    final client = ApiClient(dio: dio, storage: storage);
+    expect(await client.restoreSession(), isTrue);
+    final answer = await client.submitAnswer(
+      'question-1',
+      'session-1',
+      '通过检查服务端不保存原始视频。',
+      parentAnswerId: 'answer-1',
+    );
+
+    expect(requestBody, {
+      'session_id': 'session-1',
+      'answer_text': '通过检查服务端不保存原始视频。',
+      'parent_answer_id': 'answer-1',
+    });
+    expect(answer.askedQuestion, '如何验证隐私设计？');
+    expect(answer.parentAnswerId, 'answer-1');
+    expect(answer.followUp, '临时音频如何清理？');
+  });
 }
 
 class MemoryTokenStore implements TokenStore {

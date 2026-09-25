@@ -1,5 +1,5 @@
 import { http } from '@kit.NetworkKit';
-import { Project, DocumentItem, SessionItem, JuryQuestion, ReportPayload } from '../models/Models';
+import { Project, DocumentItem, SessionItem, JuryQuestion, JuryAnswer, ReportPayload } from '../models/Models';
 
 interface TokenPair { access_token: string; refresh_token: string; }
 interface ReportEnvelope { report: ReportPayload; }
@@ -8,6 +8,7 @@ interface CreateProjectRequest { name: string; description: string; defense_dura
 interface CreateSessionRequest { target_seconds: number; }
 interface CompleteSessionRequest { actual_seconds: number; transcript: string; }
 interface GenerateQuestionsRequest { session_id: string; count: number; }
+interface SubmitAnswerRequest { session_id: string; answer_text: string; parent_answer_id?: string; }
 
 class ApiClient {
   private accessToken: string = '';
@@ -66,6 +67,10 @@ class ApiClient {
   generateQuestions(projectId: string, sessionId: string): Promise<JuryQuestion[]> {
     const body: GenerateQuestionsRequest = { session_id: sessionId, count: 5 };
     return this.request<JuryQuestion[]>(http.RequestMethod.POST, `/projects/${projectId}/questions`, body);
+  }
+  submitAnswer(questionId: string, sessionId: string, answerText: string, parentAnswerId?: string): Promise<JuryAnswer> {
+    const body: SubmitAnswerRequest = { session_id: sessionId, answer_text: answerText, parent_answer_id: parentAnswerId };
+    return this.request<JuryAnswer>(http.RequestMethod.POST, `/questions/${questionId}/answers`, body);
   }
 }
 

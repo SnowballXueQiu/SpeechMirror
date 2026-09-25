@@ -168,9 +168,9 @@ paths:
     post:
       operationId: submitAnswer
       parameters: [{name: question_id, in: path, required: true, schema: {type: string, format: uuid}}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [session_id, answer_text], properties: {session_id: {type: string, format: uuid}, answer_text: {type: string}}}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AnswerInput'}}}}
       responses:
-        '200': {description: 基于材料的回答评价, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '200': {description: 基于材料的回答评价与下一轮追问, content: {application/json: {schema: {$ref: '#/components/schemas/Answer'}}}}
   /projects/{project_id}/trends:
     get:
       operationId: getTrends
@@ -211,6 +211,8 @@ components:
     Dimension: {type: object, required: [score, summary, evidence], properties: {score: {type: [integer, 'null'], minimum: 0, maximum: 100, description: 未采集或未完成时为null}, summary: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}}}
     ReportEnvelope: {type: object, required: [id, session_id, report, created_at], properties: {id: {type: string, format: uuid}, session_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}, report: {type: object, additionalProperties: true}}}
     Question: {type: object, required: [id, project_id, category, question, evidence, created_at], properties: {id: {type: string, format: uuid}, project_id: {type: string, format: uuid}, session_id: {type: [string, 'null'], format: uuid}, category: {type: string}, question: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}, created_at: {type: string, format: date-time}}}
+    AnswerInput: {type: object, required: [session_id, answer_text], properties: {session_id: {type: string, format: uuid}, answer_text: {type: string, minLength: 1}, parent_answer_id: {type: [string, 'null'], format: uuid, description: 回答上一轮服务端生成的追问时传入}}}
+    Answer: {type: object, required: [id, question_id, session_id, asked_question, parent_answer_id, answer_text, evaluation, created_at], properties: {id: {type: string, format: uuid}, question_id: {type: string, format: uuid}, session_id: {type: string, format: uuid}, asked_question: {type: string}, parent_answer_id: {type: [string, 'null'], format: uuid}, answer_text: {type: string}, evaluation: {type: object, additionalProperties: true}, created_at: {type: string, format: date-time}}}
     TrendPoint:
       type: object
       required: [session_id, created_at, target_seconds, actual_seconds, duration_deviation_seconds, characters_per_minute, filler_count, filler_per_minute, delivery_score, timing_score, visual_score, content_score, qa_score]

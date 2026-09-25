@@ -22,7 +22,24 @@ export interface SessionItem {
 }
 
 export interface EvidenceRef { chunk_id: string; quote: string; }
-export interface JuryQuestion { id: string; category: string; question: string; evidence: EvidenceRef[]; }
+export interface JuryQuestion { id: string; session_id?: string; category: string; question: string; evidence: EvidenceRef[]; }
+export interface JuryEvaluation {
+  score: number;
+  relevance?: string;
+  accuracy?: string;
+  suggestions?: string[];
+  follow_up: string;
+  evidence: EvidenceRef[];
+}
+export interface JuryAnswer {
+  id: string;
+  question_id: string;
+  session_id: string;
+  asked_question: string;
+  parent_answer_id?: string;
+  answer_text: string;
+  evaluation: JuryEvaluation;
+}
 export interface DimensionReport { score: number | null; summary: string; evidence: EvidenceRef[]; }
 export interface ReportPayload {
   session_id: string;
