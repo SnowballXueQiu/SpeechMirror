@@ -20,9 +20,9 @@
 ## 02. AI 供应商配置
 
 - [x] 确定 LLM 使用 DeepSeek，VPS 实测模型为 `deepseek-flash`，并与其他AI能力拆分地址和密钥。
-- [ ] Embedding 已实测 `qwen3.7-text-embedding-flash`，ASR 已实测 `qwen3-asr-flash-2026-02-10`；OCR 仍需单独实测后确定。
-- [ ] 将密钥写入本地 `services/api/.env`，不提交到 Git。
-- [ ] 确认健康接口的 `providers` 字段逐项反映 LLM、Embedding、ASR 和 OCR 配置状态；四项齐备后总览字段 `ai_configured` 为 `true`。
+- [x] 实测并确定 Embedding 使用 `qwen3.7-text-embedding-flash`、ASR 使用 `qwen3-asr-flash-2026-02-10`、OCR 使用 `qwen3.8-omni-flash`。
+- [x] 将凭据写入 VPS 私有 `services/api/.env`，权限为 `600` 且不提交到 Git；本地开发机不保留重复副本。
+- [x] 健康接口逐项返回 LLM、Embedding、ASR 和 OCR 为 `true`，四项齐备后总览字段 `ai_configured` 为 `true`。
 - [x] 保存一次不含密钥的真实 DeepSeek 调用记录，见 `docs/evidence/ai-jury-question-generation.md`。
 
 验收证据：模型名、调用时间、HTTP 状态、脱敏响应和费用记录。
@@ -33,7 +33,7 @@
 - [x] 上传每类材料，确认状态由 `processing` 转为 `ready`。
 - [x] 检查提取文本和分块数量是否落库；当前 6 份材料各生成 1 个文本分块。
 - [x] 使用阿里云百炼 `qwen3.7-text-embedding-flash` 验证向量生成、SQLite 落库和项目内相似度检索，见 `docs/evidence/embedding-retrieval.md`。
-- [x] 使用扫描 PDF 和图片检查 OCR，完成一次文本纠正与重新索引。
+- [x] 使用扫描 PDF 和图片检查本地 OCR 并完成一次文本纠正与重新索引；另实测百炼图片 OCR、分块和向量入库，见 `docs/evidence/ocr-material-ingestion.md`。
 
 验收证据：材料列表截图、提取文本、数据库片段记录和处理日志。
 
