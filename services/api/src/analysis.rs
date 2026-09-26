@@ -575,14 +575,14 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         content_json = fallback_content_evaluation(&transcript, &chunks);
         evidence = verified_evidence(content_json.get("evidence"), &chunks);
     }
+    let raw_content_score = content_json
+        .get("score")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .clamp(0, 100);
+    let content_score = calibrate_content_score(raw_content_score, &transcript, &chunks);
     let content = DimensionReport {
-        score: Some(
-            content_json
-                .get("score")
-                .and_then(Value::as_i64)
-                .unwrap_or(0)
-                .clamp(0, 100) as i32,
-        ),
+        score: Some(content_score),
         summary: content_json
             .get("summary")
             .and_then(Value::as_str)
@@ -642,10 +642,20 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         .unwrap_or_default();
     if suggestions.is_empty() {
         suggestions.extend([
-            "按背景、方案、创新、验证、局限组织陈述，减少只描述功能。".into(),
-            "每个关键结论补充一项可核验的数据、实验结果或材料依据。".into(),
-            "回答评委问题时先给结论，再说明依据和适用边界。".into(),
+            "把方案与材料中的具体模块、技术流程或实现步骤逐一对应。".into(),
+            "每个关键结论补充一项可核验的数据、实验结果或用户反馈。".into(),
+            "明确当前方案的局限、适用边界和下一步改进。".into(),
         ]);
+    }
+    for suggestion in [
+        "把方案与材料中的具体模块、技术流程或实现步骤逐一对应。",
+        "每个关键结论补充一项可核验的数据、实验结果或用户反馈。",
+        "明确当前方案的局限、适用边界和下一步改进。",
+    ] {
+        if suggestions.len() >= 3 {
+            break;
+        }
+        suggestions.push(suggestion.into());
     }
     if characters_per_minute < 180.0 {
         suggestions.push("语速偏慢，可缩短铺垫并提高信息密度。".into());
@@ -763,11 +773,11 @@ fn fallback_content_evaluation(transcript: &str, chunks: &[document_chunk::Model
         .filter(|character| !character.is_whitespace())
         .count();
     let score = if character_count >= 600 {
-        78
+        52
     } else if character_count >= 250 {
-        68
+        42
     } else {
-        58
+        28
     };
     let evidence = chunks
         .first()
@@ -790,6 +800,50 @@ fn fallback_content_evaluation(transcript: &str, chunks: &[document_chunk::Model
         "confidence": 0.35,
         "evaluation_source": "material_recovery"
     })
+}
+
+fn calibrate_content_score(
+    raw_score: i64,
+    transcript: &str,
+    chunks: &[document_chunk::Model],
+) -> i32 {
+    let character_count = transcript
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    let overlap = chunks
+        .iter()
+        .map(|chunk| text_overlap_count(transcript, &chunk.content))
+        .max()
+        .unwrap_or_default();
+    let upper_bound = if character_count < 120 {
+        35
+    } else if overlap == 0 {
+        45
+    } else if overlap < 3 {
+        65
+    } else if overlap < 6 {
+        80
+    } else {
+        100
+    };
+    raw_score.min(upper_bound) as i32
+}
+
+fn text_overlap_count(left: &str, right: &str) -> usize {
+    let left_chars = left
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    left_chars
+        .windows(2)
+        .filter_map(|pair| {
+            let token = pair.iter().collect::<String>();
+            right.contains(&token).then_some(token)
+        })
+        .filter(|token| seen.insert(token.clone()))
+        .count()
 }
 
 fn answer_improvement_suggestions(evaluation: &Value) -> Vec<String> {
@@ -994,6 +1048,27 @@ mod tests {
     fn overall_score_renormalizes_missing_dimensions() {
         let score = weighted_overall_score([(Some(80), 0.5), (Some(60), 0.25), (None, 0.25)]);
         assert_eq!(score, Some(73));
+    }
+
+    #[test]
+    fn content_score_is_capped_when_transcript_has_no_material_overlap() {
+        let chunks = vec![document_chunk::Model {
+            id: "chunk-1".into(),
+            document_id: "document-1".into(),
+            project_id: "project-1".into(),
+            ordinal: 0,
+            content: "系统采用端云协同架构".into(),
+            embedding: None,
+        }];
+
+        assert_eq!(
+            calibrate_content_score(95, "这是完全无关的泛泛描述，没有项目依据。", &chunks),
+            35
+        );
+        assert_eq!(
+            calibrate_content_score(95, &"系统采用端云协同架构并完成验证。".repeat(20), &chunks,),
+            95
+        );
     }
 
     #[test]

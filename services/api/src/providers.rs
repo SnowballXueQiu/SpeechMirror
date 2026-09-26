@@ -262,10 +262,15 @@ fn internal(error: reqwest::Error) -> ApiError {
 
 async fn checked_json(response: reqwest::Response) -> ApiResult<Value> {
     let status = response.status();
-    let text = response.text().await.map_err(internal)?;
+    let bytes = response.bytes().await.map_err(internal)?;
+    // Some compatible OpenAI endpoints occasionally include an invalid byte in
+    // reasoning_content. Lossy decoding still preserves the JSON envelope and
+    // lets the caller use the structured answer instead of falling back.
+    let text = String::from_utf8_lossy(&bytes);
     if !status.is_success() {
         return Err(ApiError::Internal(format!(
-            "AI provider returned {status}: {text}"
+            "AI provider returned {status}: {}",
+            text.chars().take(2000).collect::<String>()
         )));
     }
     serde_json::from_str(&text).map_err(ApiError::from)
