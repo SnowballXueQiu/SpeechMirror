@@ -204,6 +204,8 @@ pub struct GenerateQuestionsRequest {
     pub session_id: Option<String>,
     #[serde(default = "default_question_count")]
     pub count: usize,
+    #[serde(default)]
+    pub regenerate: bool,
 }
 
 fn default_question_count() -> usize {

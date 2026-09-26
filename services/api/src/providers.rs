@@ -58,6 +58,22 @@ impl AiClient {
     }
 
     pub async fn chat_json(&self, system: &str, user: &str) -> ApiResult<Value> {
+        self.chat_json_with_budget(system, user, std::time::Duration::from_secs(22), 2)
+            .await
+    }
+
+    pub async fn chat_json_fast(&self, system: &str, user: &str) -> ApiResult<Value> {
+        self.chat_json_with_budget(system, user, std::time::Duration::from_secs(12), 1)
+            .await
+    }
+
+    async fn chat_json_with_budget(
+        &self,
+        system: &str,
+        user: &str,
+        timeout: std::time::Duration,
+        attempts: u32,
+    ) -> ApiResult<Value> {
         let provider = &self.config.llm;
         let request_body = json!({
             "model": provider.model,
@@ -74,19 +90,17 @@ impl AiClient {
             let response = self
                 .http
                 .post(self.endpoint(provider, "chat/completions"))
-                .timeout(std::time::Duration::from_secs(35))
+                .timeout(timeout)
                 .bearer_auth(self.api_key(provider)?)
                 .json(&request_body)
                 .send()
                 .await;
             match response {
-                Ok(response)
-                    if retryable_status(response.status()) && attempt < CHAT_REQUEST_ATTEMPTS =>
-                {
+                Ok(response) if retryable_status(response.status()) && attempt < attempts => {
                     tracing::warn!(attempt, status = %response.status(), "retrying AI chat request");
                 }
                 Ok(response) => break checked_json(response).await?,
-                Err(error) if attempt < CHAT_REQUEST_ATTEMPTS => {
+                Err(error) if attempt < attempts => {
                     tracing::warn!(attempt, error = %error, "retrying AI chat request");
                 }
                 Err(error) => return Err(internal(error)),
@@ -197,8 +211,6 @@ impl AiClient {
             .ok_or_else(|| ApiError::Internal("OCR response did not contain text".into()))
     }
 }
-
-const CHAT_REQUEST_ATTEMPTS: u32 = 3;
 
 fn retryable_status(status: StatusCode) -> bool {
     matches!(

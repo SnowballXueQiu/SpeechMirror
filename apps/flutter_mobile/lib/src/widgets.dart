@@ -68,7 +68,7 @@ class PageIntro extends StatelessWidget {
     super.key,
     required this.eyebrow,
     required this.title,
-    required this.description,
+    this.description = '',
   });
   final String eyebrow;
   final String title;
@@ -88,13 +88,15 @@ class PageIntro extends StatelessWidget {
       ),
       const SizedBox(height: 8),
       Text(title, style: Theme.of(context).textTheme.headlineLarge),
-      const SizedBox(height: 8),
-      Text(
-        description,
-        style: Theme.of(
-          context,
-        ).textTheme.bodyLarge?.copyWith(color: AppColors.muted),
-      ),
+      if (description.trim().isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(
+          description,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+        ),
+      ],
     ],
   );
 }

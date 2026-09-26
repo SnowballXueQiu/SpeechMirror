@@ -153,6 +153,7 @@ class _RetryingJuryApiClient extends _JuryApiClient {
     String projectId, {
     String? sessionId,
     int count = 5,
+    bool regenerate = false,
   }) async {
     generationAttempts += 1;
     if (generationAttempts == 1) {

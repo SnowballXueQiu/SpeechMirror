@@ -161,7 +161,7 @@ paths:
         '200': {description: 问题列表, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Question'}}}}}
     post:
       operationId: generateQuestions
-      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {session_id: {type: [string, 'null'], format: uuid}, count: {type: integer, minimum: 1, maximum: 10, default: 5}}}}}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {session_id: {type: [string, 'null'], format: uuid}, count: {type: integer, minimum: 1, maximum: 10, default: 5}, regenerate: {type: boolean, default: false}}}}}}
       responses:
         '200': {description: 材料约束的问题, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Question'}}}}}
   /questions/{question_id}/answers:

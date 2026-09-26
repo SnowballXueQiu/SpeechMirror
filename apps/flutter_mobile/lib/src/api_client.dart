@@ -309,11 +309,16 @@ class ApiClient {
     String projectId, {
     String? sessionId,
     int count = 5,
+    bool regenerate = false,
   }) async {
     final response = await _authorized(
       () => _dio.post<List<dynamic>>(
         '/projects/$projectId/questions',
-        data: {'session_id': sessionId, 'count': count.clamp(1, 10)},
+        data: {
+          'session_id': sessionId,
+          'count': count.clamp(1, 10),
+          'regenerate': regenerate,
+        },
       ),
     );
     return response.data!

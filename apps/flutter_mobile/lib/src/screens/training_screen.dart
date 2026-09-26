@@ -361,7 +361,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                         ? 'PRESENTING / LOCAL VIDEO'
                         : 'STAGE 01 / PRESENTATION',
                     title: project?.name ?? '模拟答辩',
-                    description: '先面对镜头完整介绍产品。结束陈述后，AI评委会结合材料与本次转写开始提问。',
+                    description: '',
                   ),
                   const SizedBox(height: 22),
                   if (_pendingTraining != null)
@@ -370,11 +370,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                       status: _processing ? _processingLabel : null,
                     )
                   else
-                    _CameraStage(
-                      controller: _camera!,
-                      recording: _recording,
-                      overtime: _deadlineSignaled,
-                    ),
+                    _CameraStage(controller: _camera!),
                   const SizedBox(height: 18),
                   if (_recording || _recentLevels.isNotEmpty) ...[
                     _LiveWaveform(levels: _recentLevels),
@@ -447,7 +443,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                       ),
                     ),
                   const SizedBox(height: 20),
-                  const _PrivacyNote(),
                 ],
               ),
       ),
@@ -509,14 +504,8 @@ class _PendingTrainingStage extends StatelessWidget {
 }
 
 class _CameraStage extends StatelessWidget {
-  const _CameraStage({
-    required this.controller,
-    required this.recording,
-    required this.overtime,
-  });
+  const _CameraStage({required this.controller});
   final CameraController controller;
-  final bool recording;
-  final bool overtime;
 
   @override
   Widget build(BuildContext context) => AspectRatio(
@@ -527,38 +516,6 @@ class _CameraStage extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           ColoredBox(color: AppColors.ink, child: CameraPreview(controller)),
-          Positioned(
-            top: 14,
-            left: 14,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.62),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      recording ? Icons.circle : Icons.lock_outline,
-                      size: 12,
-                      color: recording ? AppColors.vermilion : Colors.white,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      recording ? (overtime ? '已超时' : '录制中') : '视频不上传',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     ),
@@ -662,24 +619,6 @@ class _TimeBlock extends StatelessWidget {
         ),
       ],
     ),
-  );
-}
-
-class _PrivacyNote extends StatelessWidget {
-  const _PrivacyNote();
-  @override
-  Widget build(BuildContext context) => const Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Icon(Icons.privacy_tip_outlined, size: 19, color: AppColors.jade),
-      SizedBox(width: 10),
-      Expanded(
-        child: Text(
-          '原始视频只保存在本机。系统仅上传语音和端侧提取的人脸可见、正面朝向、画面稳定及音量指标。',
-          style: TextStyle(color: AppColors.muted),
-        ),
-      ),
-    ],
   );
 }
 

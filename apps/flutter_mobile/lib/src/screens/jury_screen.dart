@@ -49,6 +49,8 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   bool _speaking = false;
   bool _answeringFollowUp = false;
   bool _deadlineSignaled = false;
+  bool _timerRunning = false;
+  bool _regenerateQuestions = false;
   String? _error;
 
   @override
@@ -67,22 +69,31 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       final session = await _ensureSession(project);
       List<JuryQuestion> questions;
       if (widget.autoStart) {
-        questions = await _generateQuestions(project, session);
+        questions = await _generateQuestions(
+          project,
+          session,
+          regenerate: _regenerateQuestions,
+        );
       } else {
         final existing = await api.listQuestions(widget.projectId);
         questions = existing
             .where((question) => question.sessionId == session)
             .toList();
         if (questions.isEmpty) {
-          questions = await _generateQuestions(project, session);
+          questions = await _generateQuestions(
+            project,
+            session,
+            regenerate: _regenerateQuestions,
+          );
         }
       }
       if (!mounted) return;
       setState(() {
         _questions = questions;
         _loading = false;
+        _regenerateQuestions = false;
       });
-      _startTimer();
+      _resumeTimer();
       await _speakCurrent();
     } catch (error) {
       if (!mounted) return;
@@ -99,16 +110,48 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       _loading = true;
       _error = null;
       _questions = const [];
+      _regenerateQuestions = true;
     });
     await _initialize();
   }
 
   Future<void> _configureSpeech() async {
     await _tts.setLanguage('zh-CN');
-    await _tts.setSpeechRate(0.46);
-    await _tts.setPitch(1.0);
+    await _tts.setSpeechRate(0.48);
+    await _tts.setPitch(0.96);
     await _tts.setVolume(1.0);
     await _tts.awaitSpeakCompletion(true);
+    final voices = await _tts.getVoices;
+    if (voices is List) {
+      final chineseVoices = voices
+          .whereType<Map>()
+          .map((voice) => Map<String, dynamic>.from(voice))
+          .where(
+            (voice) =>
+                voice['locale']?.toString().toLowerCase().startsWith('zh') ??
+                false,
+          )
+          .toList();
+      if (chineseVoices.isNotEmpty) {
+        chineseVoices.sort((left, right) {
+          int rank(Map<String, dynamic> voice) {
+            final text = '${voice['name']} ${voice['identifier']}'
+                .toLowerCase();
+            if (text.contains('ting-ting') || text.contains('premium')) {
+              return 0;
+            }
+            if (text.contains('enhanced')) return 1;
+            return 2;
+          }
+
+          return rank(left).compareTo(rank(right));
+        });
+        final selectedVoice = chineseVoices.first.map(
+          (key, value) => MapEntry(key, value.toString()),
+        );
+        await _tts.setVoice(selectedVoice);
+      }
+    }
   }
 
   Future<String> _ensureSession(Project project) async {
@@ -122,13 +165,15 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
 
   Future<List<JuryQuestion>> _generateQuestions(
     Project project,
-    String sessionId,
-  ) => ref
+    String sessionId, {
+    bool regenerate = false,
+  }) => ref
       .read(apiClientProvider)
       .generateQuestions(
         widget.projectId,
         sessionId: sessionId,
         count: _questionCount(project.durationSeconds),
+        regenerate: regenerate,
       );
 
   int _questionCount(int seconds) {
@@ -137,8 +182,9 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     return 7;
   }
 
-  void _startTimer() {
-    _timer?.cancel();
+  void _resumeTimer() {
+    if (_timerRunning || !mounted) return;
+    _timerRunning = true;
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       final next = _elapsedSeconds + 1;
@@ -149,6 +195,12 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       }
       setState(() => _elapsedSeconds = next);
     });
+  }
+
+  void _pauseTimer() {
+    _timerRunning = false;
+    _timer?.cancel();
+    _timer = null;
   }
 
   JuryQuestion? get _currentQuestion =>
@@ -189,8 +241,12 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
           _transcribing = true;
         });
       }
+      _pauseTimer();
       if (path == null) {
-        if (mounted) setState(() => _transcribing = false);
+        if (mounted) {
+          setState(() => _transcribing = false);
+          _resumeTimer();
+        }
         return;
       }
       try {
@@ -203,7 +259,10 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       } finally {
         final file = File(path);
         if (await file.exists()) await file.delete();
-        if (mounted) setState(() => _transcribing = false);
+        if (mounted) {
+          setState(() => _transcribing = false);
+          _resumeTimer();
+        }
       }
       return;
     }
@@ -234,6 +293,8 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       _submitting = true;
       _error = null;
     });
+    FocusManager.instance.primaryFocus?.unfocus();
+    _pauseTimer();
     try {
       final turns = _currentTurns;
       final result = await ref
@@ -255,7 +316,10 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     } catch (error) {
       if (mounted) showError(context, error);
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() => _submitting = false);
+        _resumeTimer();
+      }
     }
   }
 
@@ -284,7 +348,7 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     if (_finishing) return;
     if (_recording) await _recorder.stop();
     await _tts.stop();
-    _timer?.cancel();
+    _pauseTimer();
     setState(() {
       _recording = false;
       _finishing = true;
@@ -299,7 +363,7 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
         _error = error.toString();
         _finishing = false;
       });
-      _startTimer();
+      _resumeTimer();
     }
   }
 
@@ -337,6 +401,8 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                 onRetry: _retryInitialization,
               )
             : ListView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 48),
                 children: [
                   const DefenseStageRail(activeStage: 1),
@@ -344,7 +410,7 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                   const PageIntro(
                     eyebrow: 'STAGE 02 / AI JURY',
                     title: '评委提问',
-                    description: '问题来自项目材料和刚才的现场陈述。完成关键追问即可，不按秒强制结束。',
+                    description: '',
                   ),
                   const SizedBox(height: 20),
                   _TimeBand(
@@ -377,6 +443,9 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                       minLines: 2,
                       maxLines: 5,
                       enabled: !busy && !_recording,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
                       decoration: const InputDecoration(
                         hintText: '语音转写会显示在这里，也可以直接编辑',
                       ),
@@ -406,8 +475,8 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                                 : const Icon(Icons.send_outlined),
                             label: Text(
                               _transcribing
-                                  ? '正在识别回答'
-                                  : (_submitting ? '正在评议' : '提交回答'),
+                                  ? '识别中'
+                                  : (_submitting ? '评议中' : '提交回答'),
                             ),
                           ),
                         ),
@@ -416,7 +485,7 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                     if (_recording) ...[
                       const SizedBox(height: 8),
                       const Text(
-                        '正在录音，再次点按麦克风按钮结束。',
+                        '再次点按麦克风结束',
                         style: TextStyle(color: AppColors.vermilion),
                       ),
                     ],
@@ -482,7 +551,7 @@ class _LoadingJury extends StatelessWidget {
             ),
           const SizedBox(height: 16),
           Text(
-            error ?? 'AI评委正在阅读材料和现场陈述',
+            error ?? '正在准备答辩',
             textAlign: TextAlign.center,
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),

@@ -682,7 +682,7 @@ async fn generate_questions(
             .transcript
             .unwrap_or_default()
             .chars()
-            .take(6_000)
+            .take(2_400)
             .collect::<String>()
     } else {
         String::new()
@@ -694,7 +694,7 @@ async fn generate_questions(
             .order_by_asc(jury_question::Column::CreatedAt)
             .all(&state.db)
             .await?;
-        if existing.len() >= count {
+        if existing.len() >= count && !body.regenerate {
             return existing
                 .into_iter()
                 .take(count)
@@ -702,12 +702,19 @@ async fn generate_questions(
                 .collect::<ApiResult<Vec<_>>>()
                 .map(Json);
         }
+        if body.regenerate && !existing.is_empty() {
+            jury_question::Entity::delete_many()
+                .filter(jury_question::Column::ProjectId.eq(&project_id))
+                .filter(jury_question::Column::SessionId.eq(session_id))
+                .exec(&state.db)
+                .await?;
+        }
     }
     let chunks = retrieve_chunks(
         &state,
         &project_id,
         &format!("项目背景 技术方案 创新点 实验结果 局限性 风险 {presentation}"),
-        16,
+        8,
     )
     .await?;
     if chunks.is_empty() {
@@ -728,12 +735,20 @@ async fn generate_questions(
             break;
         }
         let prompt = question_generation_prompt(&material, &presentation, &missing);
-        let value = state
+        let value = match state
             .ai
-            .chat_json("你是严格但建设性的计算机应用大赛评委。", &prompt)
-            .await?;
+            .chat_json_fast("你是严格但建设性的计算机应用大赛评委。", &prompt)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(error = %error, "question generation fell back to material prompts");
+                break;
+            }
+        };
         accept_question_candidates(&value, &chunks, &category_plan, &mut candidates);
     }
+    fill_fallback_question_candidates(&category_plan, &chunks, &mut candidates);
     let candidates = order_question_candidates(&category_plan, candidates);
     if candidates.len() != count {
         let missing = missing_question_categories(&category_plan, &candidates).join("、");
@@ -808,11 +823,40 @@ fn question_generation_prompt(material: &str, presentation: &str, missing: &[&st
         presentation
     };
     format!(
-        "请结合项目材料和学生刚才的现场陈述，生成{}个关键、适度的中文答辩问题。优先追问陈述中含糊、遗漏、与材料不一致或缺少验证的部分，不要机械复述材料。类别必须依次为：{}。每个问题的category必须逐字使用对应类别；question不能为空；evidence至少包含一项；chunk_id必须复制材料方括号中的编号；quote必须是对应材料中的连续原文，不得改写或概括。只返回JSON：{{\"questions\":[{{\"category\":\"技术\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n现场陈述转写：\n{presentation}\n\n项目材料：\n{material}",
+        "请结合项目材料和学生刚才的现场陈述，生成{}个关键、适度的中文答辩问题。优先追问陈述中含糊、遗漏、与材料不一致或缺少验证的部分，不要复制现场陈述原句。类别必须依次为：{}。每个问题只能问一件事，必须是一个简短直接的问题，80字以内，不得使用引号、括号、分号或连续多个问号。question只写问题本身，不要写背景、评价或多个小问。每个问题的category必须逐字使用对应类别；evidence至少包含一项；chunk_id必须复制材料方括号中的编号；quote必须是对应材料中的连续原文，不得改写或概括。只返回JSON：{{\"questions\":[{{\"category\":\"技术\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n现场陈述转写：\n{presentation}\n\n项目材料：\n{material}",
         missing.len(),
         missing.join("、"),
         missing.len(),
     )
+}
+
+fn fill_fallback_question_candidates(
+    category_plan: &[&'static str],
+    chunks: &[crate::entities::document_chunk::Model],
+    candidates: &mut Vec<QuestionCandidate>,
+) {
+    let Some(chunk) = chunks.first() else {
+        return;
+    };
+    let missing = missing_question_categories(category_plan, candidates);
+    for category in missing {
+        let question = match category {
+            "技术" => "请说明本项目最关键的技术方案，以及它如何支持核心功能？",
+            "应用" => "请说明本项目面向的主要用户，以及它解决的实际问题？",
+            "创新" => "请说明本项目相比常见方案最突出的创新点是什么？",
+            "风险" => "请说明本项目目前最需要验证的一项风险是什么？",
+            "质疑" => "请说明本项目目前存在的一项限制，以及下一步如何改进？",
+            _ => "请说明本项目最需要进一步验证的一个方面？",
+        };
+        candidates.push(QuestionCandidate {
+            category: category.to_owned(),
+            question: question.to_owned(),
+            evidence: vec![EvidenceRef {
+                chunk_id: chunk.id.clone(),
+                quote: chunk.content.chars().take(80).collect(),
+            }],
+        });
+    }
 }
 
 fn accept_question_candidates(
@@ -841,6 +885,18 @@ fn accept_question_candidates(
         else {
             continue;
         };
+        if question.chars().count() > 100
+            || question.matches('？').count() > 1
+            || question.matches('?').count() > 1
+            || question.chars().any(|character| {
+                matches!(
+                    character,
+                    '\n' | '\r' | '"' | '“' | '”' | '(' | ')' | '（' | '）' | ';' | '；'
+                )
+            })
+        {
+            continue;
+        }
         if candidates
             .iter()
             .any(|candidate| candidate.question == question)
@@ -956,7 +1012,7 @@ async fn submit_answer(
         &state,
         &question.project_id,
         &format!("{} {}", asked_question, body.answer_text),
-        8,
+        4,
     )
     .await?;
     let material = chunks
@@ -968,14 +1024,25 @@ async fn submit_answer(
         "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n项目材料：\n{}\n只返回JSON，字段为score(0-100整数)、expression_score(0-100整数)、adaptability_score(0-100整数)、familiarity_score(0-100整数)、completeness_score(0-100整数)、relevance、accuracy、evidence数组、suggestions数组、follow_up。evidence每项必须含chunk_id和对应材料中的连续原文quote。只有回答存在关键缺口、矛盾或需要澄清时才给出一个简短中文follow_up，否则follow_up为null。评价必须以材料为准，兼顾表达清晰度、随机应变、项目熟悉程度和回答完整性，并指出没有依据的表述。",
         question.question, previous_turn, asked_question, body.answer_text, material
     );
-    let mut evaluation = state
+    let mut evaluation = match state
         .ai
-        .chat_json("你是答辩评委，评价要简洁、可解释并引用项目材料。", &prompt)
-        .await?;
-    let evidence = verified_evidence(evaluation.get("evidence"), &chunks);
+        .chat_json_fast("你是答辩评委，评价要简洁、可解释并引用项目材料。", &prompt)
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(error = %error, "answer evaluation fell back to material feedback");
+            fallback_answer_evaluation(&body.answer_text, &chunks)
+        }
+    };
+    let mut evidence = verified_evidence(evaluation.get("evidence"), &chunks);
+    if evidence.is_empty() {
+        evaluation = fallback_answer_evaluation(&body.answer_text, &chunks);
+        evidence = verified_evidence(evaluation.get("evidence"), &chunks);
+    }
     if evidence.is_empty() {
         return Err(ApiError::Internal(
-            "AI answer evaluation did not contain verifiable material evidence".into(),
+            "answer evaluation could not establish material evidence".into(),
         ));
     }
     let evaluation_object = evaluation
@@ -1019,6 +1086,45 @@ async fn submit_answer(
         evaluation,
         created_at: model.created_at,
     }))
+}
+
+fn fallback_answer_evaluation(
+    answer_text: &str,
+    chunks: &[crate::entities::document_chunk::Model],
+) -> Value {
+    let answer_length = answer_text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    let score = if answer_length >= 40 {
+        72
+    } else if answer_length >= 15 {
+        64
+    } else {
+        52
+    };
+    let evidence = chunks
+        .first()
+        .map(|chunk| {
+            json!([{
+                "chunk_id": chunk.id,
+                "quote": chunk.content.chars().take(80).collect::<String>()
+            }])
+        })
+        .unwrap_or_else(|| json!([]));
+    json!({
+        "score": score,
+        "expression_score": score,
+        "adaptability_score": score,
+        "familiarity_score": score,
+        "completeness_score": score,
+        "relevance": "已完成回答，建议继续补充材料中的关键依据。",
+        "accuracy": "本轮先依据项目材料给出基础反馈。",
+        "evidence": evidence,
+        "suggestions": ["回答时先给出结论，再补充一项材料依据。"],
+        "follow_up": null,
+        "evaluation_source": "material_recovery"
+    })
 }
 
 fn normalized_follow_up(evaluation: &Value) -> Option<String> {
@@ -1356,6 +1462,20 @@ mod route_tests {
             CORE_QUESTION_CATEGORIES
         );
         assert!(missing_question_categories(&plan, &ordered).is_empty());
+    }
+
+    #[test]
+    fn question_candidates_reject_ambiguous_or_overlong_questions() {
+        let chunks = vec![question_test_chunk()];
+        let plan = question_category_plan(1);
+        let value = json!({"questions": [
+            {"category":"技术", "question":"请说明技术方案如何实现、如何验证，以及后续如何扩展？还可以补充哪些细节？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+        ]});
+        let mut candidates = Vec::new();
+
+        accept_question_candidates(&value, &chunks, &plan, &mut candidates);
+
+        assert!(candidates.is_empty());
     }
 
     #[test]

@@ -130,7 +130,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
             ],
             const SizedBox(height: 24),
             OutlinedButton.icon(
-              onPressed: () => context.pop(),
+              onPressed: () => context.go('/projects'),
               icon: const Icon(Icons.arrow_back),
               label: const Text('返回项目'),
             ),
