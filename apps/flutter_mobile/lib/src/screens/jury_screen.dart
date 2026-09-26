@@ -363,7 +363,6 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
         _error = error.toString();
         _finishing = false;
       });
-      _resumeTimer();
     }
   }
 
@@ -509,7 +508,9 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                       ),
                       label: Text(
                         _currentIndex + 1 >= _questions.length
-                            ? (_finishing ? '正在生成综合报告' : '结束答辩并生成报告')
+                            ? (_finishing
+                                  ? '正在生成综合报告'
+                                  : (_error == null ? '结束答辩并生成报告' : '重试生成报告'))
                             : '下一题',
                       ),
                     ),

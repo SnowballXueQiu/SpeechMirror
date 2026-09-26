@@ -1032,12 +1032,22 @@ async fn submit_answer(
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(error = %error, "answer evaluation fell back to material feedback");
-            fallback_answer_evaluation(&body.answer_text, &chunks)
+            fallback_answer_evaluation(
+                &asked_question,
+                &body.answer_text,
+                &chunks,
+                body.parent_answer_id.is_none(),
+            )
         }
     };
     let mut evidence = verified_evidence(evaluation.get("evidence"), &chunks);
     if evidence.is_empty() {
-        evaluation = fallback_answer_evaluation(&body.answer_text, &chunks);
+        evaluation = fallback_answer_evaluation(
+            &asked_question,
+            &body.answer_text,
+            &chunks,
+            body.parent_answer_id.is_none(),
+        );
         evidence = verified_evidence(evaluation.get("evidence"), &chunks);
     }
     if evidence.is_empty() {
@@ -1045,15 +1055,36 @@ async fn submit_answer(
             "answer evaluation could not establish material evidence".into(),
         ));
     }
-    let evaluation_object = evaluation
-        .as_object_mut()
-        .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
-    evaluation_object.insert("evidence".into(), serde_json::to_value(evidence)?);
-    let score = evaluation_object
-        .get("score")
+    if evaluation.get("score").and_then(Value::as_i64).is_none() {
+        evaluation = fallback_answer_evaluation(
+            &asked_question,
+            &body.answer_text,
+            &chunks,
+            body.parent_answer_id.is_none(),
+        );
+        evidence = verified_evidence(evaluation.get("evidence"), &chunks);
+    }
+    {
+        let evaluation_object = evaluation
+            .as_object_mut()
+            .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
+        evaluation_object.insert("evidence".into(), serde_json::to_value(evidence)?);
+    }
+    enrich_answer_feedback(
+        &mut evaluation,
+        &asked_question,
+        &body.answer_text,
+        body.parent_answer_id.is_none(),
+    );
+    let score = evaluation
+        .as_object()
+        .and_then(|object| object.get("score"))
         .and_then(Value::as_i64)
         .ok_or_else(|| ApiError::Internal("AI answer evaluation did not contain a score".into()))?
         .clamp(0, 100);
+    let evaluation_object = evaluation
+        .as_object_mut()
+        .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
     evaluation_object.insert("score".into(), json!(score));
     let follow_up = normalized_follow_up(&evaluation);
     let evaluation_object = evaluation
@@ -1089,8 +1120,10 @@ async fn submit_answer(
 }
 
 fn fallback_answer_evaluation(
+    asked_question: &str,
     answer_text: &str,
     chunks: &[crate::entities::document_chunk::Model],
+    allow_follow_up: bool,
 ) -> Value {
     let answer_length = answer_text
         .chars()
@@ -1112,19 +1145,75 @@ fn fallback_answer_evaluation(
             }])
         })
         .unwrap_or_else(|| json!([]));
+    let follow_up = if allow_follow_up && answer_length < 80 {
+        format!(
+            "请结合材料补充“{}”的一个具体依据或结果？",
+            asked_question.chars().take(30).collect::<String>()
+        )
+    } else {
+        String::new()
+    };
     json!({
         "score": score,
         "expression_score": score,
         "adaptability_score": score,
         "familiarity_score": score,
         "completeness_score": score,
-        "relevance": "已完成回答，建议继续补充材料中的关键依据。",
-        "accuracy": "本轮先依据项目材料给出基础反馈。",
+        "relevance": if answer_length < 40 { "回答触及问题方向，但信息仍不完整。" } else { "回答涉及问题核心，建议进一步对应项目材料。" },
+        "accuracy": "当前反馈已引用项目材料片段；请补充可核验的数据、方案或使用场景。",
         "evidence": evidence,
-        "suggestions": ["回答时先给出结论，再补充一项材料依据。"],
-        "follow_up": null,
+        "suggestions": [
+            "先用一句话直接回答问题，再补充一项材料依据。",
+            "补充一个可验证的技术细节、数据结果或实际使用场景。",
+            "避免连续使用口头填充词，回答结构可按结论、依据、边界展开。"
+        ],
+        "follow_up": if follow_up.is_empty() { Value::Null } else { Value::String(follow_up) },
         "evaluation_source": "material_recovery"
     })
+}
+
+fn enrich_answer_feedback(
+    evaluation: &mut Value,
+    asked_question: &str,
+    answer_text: &str,
+    allow_follow_up: bool,
+) {
+    let answer_length = answer_text
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    let needs_follow_up =
+        allow_follow_up && answer_length < 80 && normalized_follow_up(evaluation).is_none();
+    let Some(object) = evaluation.as_object_mut() else {
+        return;
+    };
+    let suggestions = object.entry("suggestions").or_insert_with(|| json!([]));
+    if let Some(items) = suggestions.as_array_mut() {
+        for suggestion in [
+            "先用一句话直接回答问题，再补充一项材料依据。",
+            "补充一个可验证的技术细节、数据结果或实际使用场景。",
+            "回答可按结论、依据、边界组织，避免只给笼统判断。",
+        ] {
+            if items.len() >= 2 {
+                break;
+            }
+            items.push(Value::String(suggestion.into()));
+        }
+    } else {
+        *suggestions = json!([
+            "先用一句话直接回答问题，再补充一项材料依据。",
+            "补充一个可验证的技术细节、数据结果或实际使用场景。"
+        ]);
+    }
+    if needs_follow_up {
+        object.insert(
+            "follow_up".into(),
+            json!(format!(
+                "请结合材料补充“{}”的一个具体依据或结果？",
+                asked_question.chars().take(30).collect::<String>()
+            )),
+        );
+    }
 }
 
 fn normalized_follow_up(evaluation: &Value) -> Option<String> {
@@ -1476,6 +1565,27 @@ mod route_tests {
         accept_question_candidates(&value, &chunks, &plan, &mut candidates);
 
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn recovered_answer_feedback_keeps_suggestions_and_follow_up() {
+        let value = fallback_answer_evaluation(
+            "请说明项目面向的主要用户？",
+            "主要面向学生。",
+            &[question_test_chunk()],
+            true,
+        );
+
+        assert!(
+            value["suggestions"]
+                .as_array()
+                .is_some_and(|items| items.len() >= 2)
+        );
+        assert!(normalized_follow_up(&value).is_some());
+        assert_eq!(
+            verified_evidence(value.get("evidence"), &[question_test_chunk()]).len(),
+            1
+        );
     }
 
     #[test]
