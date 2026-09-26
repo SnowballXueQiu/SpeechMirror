@@ -180,11 +180,13 @@ class EvidenceRef {
 class RehearsalReport {
   const RehearsalReport({
     required this.sessionId,
+    this.overallScore,
     required this.actualSeconds,
     required this.characterCount,
     required this.charactersPerMinute,
     required this.fillerCounts,
     this.longPauseCount,
+    this.audioWaveform = const [],
     required this.content,
     required this.delivery,
     required this.timing,
@@ -195,11 +197,13 @@ class RehearsalReport {
     this.modelConfidence,
   });
   final String sessionId;
+  final int? overallScore;
   final int actualSeconds;
   final int characterCount;
   final double charactersPerMinute;
   final Map<String, int> fillerCounts;
   final int? longPauseCount;
+  final List<AudioWavePoint> audioWaveform;
   final DimensionReport content;
   final DimensionReport delivery;
   final DimensionReport timing;
@@ -213,6 +217,7 @@ class RehearsalReport {
     final json = envelope['report'] as Map<String, dynamic>;
     return RehearsalReport(
       sessionId: json['session_id'] as String,
+      overallScore: (json['overall_score'] as num?)?.toInt(),
       actualSeconds: json['actual_seconds'] as int? ?? 0,
       characterCount: json['character_count'] as int? ?? 0,
       charactersPerMinute:
@@ -220,6 +225,9 @@ class RehearsalReport {
       fillerCounts: (json['filler_counts'] as Map<String, dynamic>? ?? const {})
           .map((key, value) => MapEntry(key, (value as num).toInt())),
       longPauseCount: (json['long_pause_count'] as num?)?.toInt(),
+      audioWaveform: (json['audio_waveform'] as List<dynamic>? ?? const [])
+          .map((item) => AudioWavePoint.fromJson(item as Map<String, dynamic>))
+          .toList(),
       content: DimensionReport.fromJson(
         json['content'] as Map<String, dynamic>,
       ),
@@ -236,6 +244,18 @@ class RehearsalReport {
       modelConfidence: (json['model_confidence'] as num?)?.toDouble(),
     );
   }
+}
+
+class AudioWavePoint {
+  const AudioWavePoint({required this.timestampMs, required this.level});
+
+  final int timestampMs;
+  final double level;
+
+  factory AudioWavePoint.fromJson(Map<String, dynamic> json) => AudioWavePoint(
+    timestampMs: (json['timestamp_ms'] as num?)?.toInt() ?? 0,
+    level: (json['level'] as num?)?.toDouble() ?? 0,
+  );
 }
 
 class JuryQuestion {

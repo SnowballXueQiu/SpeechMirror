@@ -20,6 +20,14 @@ struct ReportPage {
       Column() {
         Row() { Button('‹').width(42).height(42).fontSize(28).fontColor('#18211D').backgroundColor(Color.Transparent).onClick(() => router.back()); Text('训练报告').fontSize(22).fontWeight(FontWeight.Bold) }.width('100%')
         Text('这一次，你说清楚了吗？').fontSize(28).fontWeight(FontWeight.Bold).fontColor('#18211D').margin({ top: 20 }).width('100%')
+        if (this.report.overall_score !== null && this.report.overall_score !== undefined) {
+          Row() {
+            Text('综合表现').fontSize(15).fontWeight(FontWeight.Bold).fontColor(Color.White)
+            Blank()
+            Text(`${this.report.overall_score}`).fontSize(34).fontWeight(FontWeight.Bold).fontColor('#F2C14E')
+            Text(' / 100').fontSize(13).fontColor('#AAAAAA')
+          }.padding(18).width('100%').margin({ top: 18 }).backgroundColor('#176B5B').borderRadius(7)
+        }
         Row() {
           Column({ space: 4 }) { Text('语速').fontSize(11).fontColor('#AAAAAA'); Text(`${Math.round(this.report.characters_per_minute)} 字/分`).fontSize(19).fontWeight(FontWeight.Bold).fontColor(Color.White) }.layoutWeight(1)
           Column({ space: 4 }) { Text('时长').fontSize(11).fontColor('#AAAAAA'); Text(`${this.report.actual_seconds} 秒`).fontSize(19).fontWeight(FontWeight.Bold).fontColor(Color.White) }.layoutWeight(1)

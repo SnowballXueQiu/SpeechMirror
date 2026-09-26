@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../auth_controller.dart';
+import '../device_analysis.dart';
 import '../models.dart';
 import '../pending_training_store.dart';
 import '../theme.dart';
@@ -34,15 +35,19 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   RehearsalSession? _session;
   PendingTraining? _pendingTraining;
   Timer? _timer;
+  StreamSubscription<Amplitude>? _amplitudeSubscription;
+  final Stopwatch _recordingClock = Stopwatch();
+  final List<AudioLevelSample> _audioLevels = [];
+  final List<double> _recentLevels = [];
   int _elapsedSeconds = 0;
   bool _initializing = true;
   bool _recording = false;
   bool _processing = false;
   bool _deadlineSignaled = false;
   String? _audioPath;
-  String? _videoPath;
   String? _setupError;
   String? _processError;
+  String _processingLabel = '正在准备';
 
   @override
   void initState() {
@@ -75,7 +80,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
           );
           _pendingTraining = pending;
           _audioPath = pending.audioPath;
-          _videoPath = pending.videoPath;
           _elapsedSeconds = pending.actualSeconds;
           _initializing = false;
         });
@@ -122,6 +126,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     setState(() {
       _processError = null;
       _processing = true;
+      _processingLabel = '正在创建训练记录';
     });
     try {
       final audioRecorder = _audioRecorder ??= AudioRecorder();
@@ -145,6 +150,15 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         await camera.stopVideoRecording();
         rethrow;
       }
+      _audioLevels.clear();
+      _recentLevels.clear();
+      _recordingClock
+        ..reset()
+        ..start();
+      await _amplitudeSubscription?.cancel();
+      _amplitudeSubscription = audioRecorder
+          .onAmplitudeChanged(const Duration(milliseconds: 250))
+          .listen(_collectAmplitude);
       _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
       if (mounted) {
         setState(() {
@@ -168,7 +182,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
 
   void _tick() {
     if (!mounted || !_recording) return;
-    final next = _elapsedSeconds + 1;
+    final next = _recordingClock.elapsed.inSeconds;
     if (!_deadlineSignaled && next >= (_project?.durationSeconds ?? 300)) {
       _deadlineSignaled = true;
       HapticFeedback.heavyImpact();
@@ -176,12 +190,32 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     setState(() => _elapsedSeconds = next);
   }
 
+  void _collectAmplitude(Amplitude amplitude) {
+    if (!_recordingClock.isRunning) return;
+    final level = normalizeDecibels(amplitude.current);
+    _audioLevels.add(
+      AudioLevelSample(
+        timestampMs: _recordingClock.elapsedMilliseconds,
+        level: level,
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _recentLevels.add(level);
+      if (_recentLevels.length > 42) _recentLevels.removeAt(0);
+    });
+  }
+
   Future<void> _stop() async {
     if (!_recording || _processing) return;
     _timer?.cancel();
+    _recordingClock.stop();
+    await _amplitudeSubscription?.cancel();
+    _amplitudeSubscription = null;
     setState(() {
       _recording = false;
       _processing = true;
+      _processingLabel = '正在保存陈述';
       _processError = null;
     });
     try {
@@ -199,13 +233,13 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         videoPath: destination,
         actualSeconds: _elapsedSeconds.clamp(1, 3600),
         savedAt: DateTime.now(),
+        audioLevels: List.unmodifiable(_audioLevels),
       );
       await ref.read(pendingTrainingStoreProvider).save(pending);
       if (mounted) {
         setState(() {
           _pendingTraining = pending;
           _audioPath = pending.audioPath;
-          _videoPath = pending.videoPath;
         });
       }
       await _submitForAnalysis();
@@ -225,6 +259,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     setState(() {
       _processing = true;
       _processError = null;
+      _processingLabel = '正在识别陈述内容';
     });
     try {
       if (!await ref.read(pendingTrainingStoreProvider).mediaExists(pending)) {
@@ -241,18 +276,34 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         await ref.read(pendingTrainingStoreProvider).save(pending);
         if (mounted) setState(() => _pendingTraining = pending);
       }
+      if (!pending.metricsUploaded) {
+        if (mounted) setState(() => _processingLabel = '正在分析画面与停顿');
+        final visual = await const DeviceAnalysis().analyzeVideo(
+          pending.videoPath,
+          pending.actualSeconds * 1000,
+        );
+        final metrics = mergeDeviceMetrics(pending.audioLevels, visual);
+        if (metrics.isNotEmpty) {
+          await api.uploadMetrics(pending.sessionId, metrics);
+          pending = pending.withMetricsUploaded();
+          await ref.read(pendingTrainingStoreProvider).save(pending);
+          if (mounted) setState(() => _pendingTraining = pending);
+        }
+      }
+      if (mounted) setState(() => _processingLabel = '正在准备AI评委');
       await api.completeSession(
         pending.sessionId,
         pending.actualSeconds,
         transcript,
       );
-      await api.analyzeSession(pending.sessionId);
       await ref.read(pendingTrainingStoreProvider).delete(widget.projectId);
       final audio = File(pending.audioPath);
       if (await audio.exists()) await audio.delete();
       if (mounted) {
         setState(() => _pendingTraining = null);
-        context.go('/reports/${pending.sessionId}');
+        context.go(
+          '/projects/${widget.projectId}/jury?session=${pending.sessionId}&autostart=1',
+        );
       }
     } catch (error) {
       if (mounted) {
@@ -267,6 +318,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _recordingClock.stop();
+    _amplitudeSubscription?.cancel();
     _camera?.dispose();
     _audioRecorder?.dispose();
     super.dispose();
@@ -301,16 +354,21 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
             : ListView(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
                 children: [
+                  const DefenseStageRail(activeStage: 0),
+                  const SizedBox(height: 22),
                   PageIntro(
                     eyebrow: _recording
-                        ? 'RECORDING / LOCAL ONLY'
-                        : 'PRIVATE REHEARSAL',
+                        ? 'PRESENTING / LOCAL VIDEO'
+                        : 'STAGE 01 / PRESENTATION',
                     title: project?.name ?? '模拟答辩',
-                    description: '视频仅保存在本机；服务端只接收音频用于语音识别。',
+                    description: '先面对镜头完整介绍产品。结束陈述后，AI评委会结合材料与本次转写开始提问。',
                   ),
                   const SizedBox(height: 22),
                   if (_pendingTraining != null)
-                    _PendingTrainingStage(training: _pendingTraining!)
+                    _PendingTrainingStage(
+                      training: _pendingTraining!,
+                      status: _processing ? _processingLabel : null,
+                    )
                   else
                     _CameraStage(
                       controller: _camera!,
@@ -318,6 +376,10 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                       overtime: _deadlineSignaled,
                     ),
                   const SizedBox(height: 18),
+                  if (_recording || _recentLevels.isNotEmpty) ...[
+                    _LiveWaveform(levels: _recentLevels),
+                    const SizedBox(height: 14),
+                  ],
                   Row(
                     children: [
                       Expanded(
@@ -352,23 +414,13 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  if (_videoPath != null) ...[
-                    Text(
-                      '本地视频：$_videoPath',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
                   if (_pendingTraining != null && !_recording)
                     FilledButton.icon(
                       onPressed: _processing ? null : _submitForAnalysis,
                       icon: const Icon(Icons.sync),
-                      label: Text(_processError == null ? '继续生成报告' : '重试音频分析'),
+                      label: Text(
+                        _processError == null ? '继续进入AI答辩' : '重试陈述分析',
+                      ),
                     )
                   else
                     FilledButton.icon(
@@ -390,8 +442,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                             ),
                       label: Text(
                         _processing
-                            ? '正在处理'
-                            : (_recording ? '结束并生成报告' : '开始录制'),
+                            ? _processingLabel
+                            : (_recording ? '结束陈述，进入答辩' : '开始产品陈述'),
                       ),
                     ),
                   const SizedBox(height: 20),
@@ -407,9 +459,10 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
 }
 
 class _PendingTrainingStage extends StatelessWidget {
-  const _PendingTrainingStage({required this.training});
+  const _PendingTrainingStage({required this.training, this.status});
 
   final PendingTraining training;
+  final String? status;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -423,11 +476,20 @@ class _PendingTrainingStage extends StatelessWidget {
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Icon(Icons.video_file_outlined, size: 48, color: Colors.white),
+        if (status == null)
+          const Icon(Icons.video_file_outlined, size: 48, color: Colors.white)
+        else
+          const SizedBox.square(
+            dimension: 42,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+              color: Colors.white,
+            ),
+          ),
         const SizedBox(height: 16),
-        const Text(
-          '本地录制待分析',
-          style: TextStyle(
+        Text(
+          status ?? '陈述已保存在本机',
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 21,
             fontWeight: FontWeight.w800,
@@ -435,7 +497,9 @@ class _PendingTrainingStage extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          '已保留 ${training.actualSeconds} 秒视频与音频，恢复网络后可继续提交。',
+          status == null
+              ? '已保留 ${training.actualSeconds} 秒视频与音频，可继续进入AI答辩。'
+              : '正在处理 ${training.actualSeconds} 秒陈述，请保持应用在前台。',
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.white70, height: 1.5),
         ),
@@ -463,7 +527,6 @@ class _CameraStage extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           ColoredBox(color: AppColors.ink, child: CameraPreview(controller)),
-          IgnorePointer(child: CustomPaint(painter: _GuidePainter())),
           Positioned(
             top: 14,
             left: 14,
@@ -502,30 +565,65 @@ class _CameraStage extends StatelessWidget {
   );
 }
 
-class _GuidePainter extends CustomPainter {
+class _LiveWaveform extends StatelessWidget {
+  const _LiveWaveform({required this.levels});
+
+  final List<double> levels;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 64,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: AppColors.white,
+      border: Border.all(color: AppColors.line),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: CustomPaint(
+      painter: _WaveformPainter(levels),
+      child: const SizedBox.expand(),
+    ),
+  );
+}
+
+class _WaveformPainter extends CustomPainter {
+  const _WaveformPainter(this.levels);
+
+  final List<double> levels;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.5)
-      ..style = PaintingStyle.stroke
+    final baseline = size.height / 2;
+    final centerPaint = Paint()
+      ..color = AppColors.line
       ..strokeWidth = 1;
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(size.width / 2, size.height * 0.32),
-        width: size.width * 0.36,
-        height: size.height * 0.25,
-      ),
-      paint,
-    );
     canvas.drawLine(
-      Offset(size.width * 0.18, size.height * 0.73),
-      Offset(size.width * 0.82, size.height * 0.73),
-      paint,
+      Offset(0, baseline),
+      Offset(size.width, baseline),
+      centerPaint,
     );
+    if (levels.isEmpty) return;
+    final barWidth = size.width / levels.length;
+    final paint = Paint()
+      ..color = AppColors.jade
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = (barWidth * 0.42).clamp(2.0, 5.0);
+    for (var index = 0; index < levels.length; index++) {
+      final height = (4 + levels[index] * (size.height - 8)).clamp(
+        4.0,
+        size.height,
+      );
+      final x = barWidth * index + barWidth / 2;
+      canvas.drawLine(
+        Offset(x, baseline - height / 2),
+        Offset(x, baseline + height / 2),
+        paint,
+      );
+    }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _WaveformPainter oldDelegate) => true;
 }
 
 class _TimeBlock extends StatelessWidget {
@@ -577,7 +675,7 @@ class _PrivacyNote extends StatelessWidget {
       SizedBox(width: 10),
       Expanded(
         child: Text(
-          '当前版本不上传原始视频。端侧视觉模型接入前，不生成视线或姿态分数。',
+          '原始视频只保存在本机。系统仅上传语音和端侧提取的人脸可见、正面朝向、画面稳定及音量指标。',
           style: TextStyle(color: AppColors.muted),
         ),
       ),

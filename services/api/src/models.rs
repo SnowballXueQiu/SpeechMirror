@@ -163,13 +163,24 @@ pub struct TimelineIssue {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AudioWavePoint {
+    pub timestamp_ms: i64,
+    #[schema(minimum = 0, maximum = 1)]
+    pub level: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ReportPayload {
     pub session_id: String,
+    #[serde(default)]
+    pub overall_score: Option<i32>,
     pub actual_seconds: i32,
     pub character_count: usize,
     pub characters_per_minute: f64,
     pub filler_counts: BTreeMap<String, usize>,
     pub long_pause_count: Option<usize>,
+    #[serde(default)]
+    pub audio_waveform: Vec<AudioWavePoint>,
     pub content: DimensionReport,
     pub delivery: DimensionReport,
     pub timing: DimensionReport,

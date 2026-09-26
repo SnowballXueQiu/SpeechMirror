@@ -41,11 +41,14 @@ export interface JuryAnswer {
   evaluation: JuryEvaluation;
 }
 export interface DimensionReport { score: number | null; summary: string; evidence: EvidenceRef[]; }
+export interface AudioWavePoint { timestamp_ms: number; level: number; }
 export interface ReportPayload {
   session_id: string;
+  overall_score?: number | null;
   actual_seconds: number;
   characters_per_minute: number;
   long_pause_count?: number | null;
+  audio_waveform?: AudioWavePoint[];
   content: DimensionReport;
   delivery: DimensionReport;
   timing: DimensionReport;

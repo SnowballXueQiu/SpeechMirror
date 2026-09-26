@@ -2,6 +2,67 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
+class DefenseStageRail extends StatelessWidget {
+  const DefenseStageRail({super.key, required this.activeStage});
+
+  final int activeStage;
+
+  static const _labels = ['产品陈述', 'AI答辩', '综合报告'];
+  static const _icons = [
+    Icons.videocam_outlined,
+    Icons.record_voice_over_outlined,
+    Icons.assessment_outlined,
+  ];
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      for (var index = 0; index < _labels.length; index++) ...[
+        Expanded(
+          child: Column(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: index <= activeStage
+                      ? AppColors.jade
+                      : AppColors.paperStrong,
+                ),
+                child: Icon(
+                  _icons[index],
+                  size: 18,
+                  color: index <= activeStage ? Colors.white : AppColors.muted,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _labels[index],
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: index == activeStage
+                      ? FontWeight.w800
+                      : FontWeight.w500,
+                  color: index == activeStage ? AppColors.ink : AppColors.muted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (index < _labels.length - 1)
+          Container(
+            width: 28,
+            height: 2,
+            margin: const EdgeInsets.only(bottom: 24),
+            color: index < activeStage ? AppColors.jade : AppColors.line,
+          ),
+      ],
+    ],
+  );
+}
+
 class PageIntro extends StatelessWidget {
   const PageIntro({
     super.key,

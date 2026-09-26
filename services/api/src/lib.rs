@@ -41,12 +41,10 @@ pub async fn app(config: Config) -> anyhow::Result<Router> {
         .database_url
         .strip_prefix("sqlite://")
         .and_then(|value| value.split('?').next())
+        && path != ":memory:"
+        && let Some(parent) = std::path::Path::new(path).parent()
     {
-        if path != ":memory:" {
-            if let Some(parent) = std::path::Path::new(path).parent() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
-        }
+        tokio::fs::create_dir_all(parent).await?;
     }
     let mut options = ConnectOptions::new(config.database_url.clone());
     options

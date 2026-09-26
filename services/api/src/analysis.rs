@@ -17,7 +17,7 @@ use crate::{
     AppState,
     entities::{document, document_chunk, jury_answer, rehearsal_session, report, session_metric},
     error::{ApiError, ApiResult},
-    models::{DimensionReport, EvidenceRef, ReportPayload, TimelineIssue},
+    models::{AudioWavePoint, DimensionReport, EvidenceRef, ReportPayload, TimelineIssue},
 };
 
 pub async fn ingest_document(state: &AppState, document_id: &str) -> ApiResult<()> {
@@ -296,13 +296,12 @@ pub fn chunk_text(text: &str, max_chars: usize, overlap: usize) -> Vec<String> {
     let mut start = 0;
     while start < chars.len() {
         let mut end = (start + max_chars).min(chars.len());
-        if end < chars.len() {
-            if let Some(relative) = chars[start..end]
+        if end < chars.len()
+            && let Some(relative) = chars[start..end]
                 .iter()
                 .rposition(|c| matches!(c, '。' | '！' | '？' | '\n'))
-            {
-                end = start + relative + 1;
-            }
+        {
+            end = start + relative + 1;
         }
         if end <= start {
             end = (start + max_chars).min(chars.len());
@@ -386,7 +385,7 @@ pub fn verified_evidence(
                 return None;
             }
             let key = (evidence.chunk_id.clone(), quote.to_owned());
-            seen.insert(key.clone()).then(|| EvidenceRef {
+            seen.insert(key.clone()).then_some(EvidenceRef {
                 chunk_id: key.0,
                 quote: key.1,
             })
@@ -400,11 +399,35 @@ async fn qa_dimension(state: &AppState, session_id: &str) -> ApiResult<Dimension
         .all(&state.db)
         .await?;
     let mut scores = Vec::new();
+    let mut expression_scores = Vec::new();
+    let mut adaptability_scores = Vec::new();
+    let mut familiarity_scores = Vec::new();
+    let mut completeness_scores = Vec::new();
     let mut evidence = Vec::new();
     for answer in &answers {
         if let Some(score) = answer.evaluation_json.get("score").and_then(Value::as_i64) {
             scores.push(score.clamp(0, 100) as i32);
         }
+        collect_evaluation_score(
+            &answer.evaluation_json,
+            "expression_score",
+            &mut expression_scores,
+        );
+        collect_evaluation_score(
+            &answer.evaluation_json,
+            "adaptability_score",
+            &mut adaptability_scores,
+        );
+        collect_evaluation_score(
+            &answer.evaluation_json,
+            "familiarity_score",
+            &mut familiarity_scores,
+        );
+        collect_evaluation_score(
+            &answer.evaluation_json,
+            "completeness_score",
+            &mut completeness_scores,
+        );
         if let Some(items) = answer
             .evaluation_json
             .get("evidence")
@@ -423,10 +446,34 @@ async fn qa_dimension(state: &AppState, session_id: &str) -> ApiResult<Dimension
         score,
         summary: score.map_or_else(
             || "尚未完成AI评委问答，本维度不评分。".into(),
-            |value| format!("已评价{}个回答，平均得分{}。", scores.len(), value),
+            |value| {
+                format!(
+                    "已评价{}个回答，平均得分{}。表达{}，随机应变{}，项目熟悉度{}，回答完整度{}。",
+                    scores.len(),
+                    value,
+                    score_label(average_i32(&expression_scores)),
+                    score_label(average_i32(&adaptability_scores)),
+                    score_label(average_i32(&familiarity_scores)),
+                    score_label(average_i32(&completeness_scores)),
+                )
+            },
         ),
         evidence,
     })
+}
+
+fn collect_evaluation_score(value: &Value, key: &str, scores: &mut Vec<i32>) {
+    if let Some(score) = value.get(key).and_then(Value::as_i64) {
+        scores.push(score.clamp(0, 100) as i32);
+    }
+}
+
+fn average_i32(scores: &[i32]) -> Option<i32> {
+    (!scores.is_empty()).then(|| scores.iter().sum::<i32>() / scores.len() as i32)
+}
+
+fn score_label(score: Option<i32>) -> String {
+    score.map_or_else(|| "暂无数据".into(), |value| format!("{value}分"))
 }
 
 pub async fn refresh_report_qa(state: &AppState, session_id: &str) -> ApiResult<()> {
@@ -439,6 +486,13 @@ pub async fn refresh_report_qa(state: &AppState, session_id: &str) -> ApiResult<
     };
     let mut payload: ReportPayload = serde_json::from_value(model.report_json.clone())?;
     payload.qa = qa_dimension(state, session_id).await?;
+    payload.overall_score = weighted_overall_score([
+        (payload.content.score, 0.30),
+        (payload.delivery.score, 0.20),
+        (payload.timing.score, 0.10),
+        (payload.visual.score, 0.15),
+        (payload.qa.score, 0.25),
+    ]);
     let mut active: report::ActiveModel = model.into();
     active.report_json = Set(serde_json::to_value(payload)?);
     active.update(&state.db).await?;
@@ -481,6 +535,9 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         .order_by_asc(session_metric::Column::TimestampMs)
         .all(&state.db)
         .await?;
+    let pause_issues = detect_long_pauses(&metrics);
+    let long_pause_count = pause_issues.as_ref().map(Vec::len);
+    let audio_waveform = downsample_audio_waveform(&metrics, 120);
     let visible: Vec<_> = metrics.iter().filter(|m| m.face_detected).collect();
     let gaze = average(visible.iter().map(|m| m.gaze_centered));
     let posture = average(visible.iter().map(|m| m.posture_score));
@@ -529,9 +586,11 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
     };
 
     let filler_total: usize = filler_counts.values().sum();
-    let delivery_score = (100.0 - filler_total as f64 * 3.0 - speed_penalty(characters_per_minute))
-        .round()
-        .clamp(0.0, 100.0) as i32;
+    let pause_penalty = long_pause_count.unwrap_or_default() as f64 * 3.0;
+    let delivery_score =
+        (100.0 - filler_total as f64 * 3.0 - pause_penalty - speed_penalty(characters_per_minute))
+            .round()
+            .clamp(0.0, 100.0) as i32;
     let duration_delta = (actual_seconds - session.target_seconds).unsigned_abs() as f64;
     let timing_score = (100.0 - duration_delta / session.target_seconds.max(1) as f64 * 100.0)
         .round()
@@ -539,28 +598,36 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
     let visual_score = ((gaze * 0.45 + posture * 0.35 + face_ratio * 0.2) * 100.0)
         .round()
         .clamp(0.0, 100.0) as i32;
-    let mut timeline = Vec::new();
+    let mut timeline = pause_issues.unwrap_or_default();
+    let mut last_visual_issue_ms = -5_000_i64;
     for metric in &metrics {
+        if metric.timestamp_ms - last_visual_issue_ms < 3_000 {
+            continue;
+        }
         if !metric.face_detected {
             timeline.push(TimelineIssue {
                 timestamp_ms: metric.timestamp_ms,
                 kind: "framing".into(),
                 message: "人物短暂离开画面".into(),
             });
+            last_visual_issue_ms = metric.timestamp_ms;
         } else if metric.gaze_centered < 0.45 {
             timeline.push(TimelineIssue {
                 timestamp_ms: metric.timestamp_ms,
                 kind: "gaze".into(),
-                message: "视线明显偏离镜头".into(),
+                message: "头部朝向或画面位置明显偏离镜头".into(),
             });
+            last_visual_issue_ms = metric.timestamp_ms;
         } else if metric.posture_score < 0.5 {
             timeline.push(TimelineIssue {
                 timestamp_ms: metric.timestamp_ms,
                 kind: "posture".into(),
-                message: "姿态稳定性下降".into(),
+                message: "画面居中或头部稳定性下降".into(),
             });
+            last_visual_issue_ms = metric.timestamp_ms;
         }
     }
+    timeline.sort_by_key(|item| item.timestamp_ms);
     timeline.truncate(20);
     let mut suggestions: Vec<String> = content_json
         .get("suggestions")
@@ -576,19 +643,62 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
     if filler_total > 5 {
         suggestions.push("口头禅较多，可用短暂停顿替代重复连接词。".into());
     }
+    if long_pause_count.is_some_and(|count| count > 2) {
+        suggestions.push("出现多次长停顿，建议提前整理技术路线和关键数据的过渡句。".into());
+    }
+
+    let qa = qa_dimension(state, session_id).await?;
+    let answers = jury_answer::Entity::find()
+        .filter(jury_answer::Column::SessionId.eq(session_id))
+        .order_by_asc(jury_answer::Column::CreatedAt)
+        .all(&state.db)
+        .await?;
+    for answer in &answers {
+        suggestions.extend(answer_improvement_suggestions(&answer.evaluation_json));
+    }
+    let mut seen_suggestions = HashSet::new();
+    suggestions.retain(|item| seen_suggestions.insert(item.trim().to_owned()));
+    suggestions.truncate(8);
+    let visual = DimensionReport {
+        score: (!metrics.is_empty()).then_some(visual_score),
+        summary: if metrics.is_empty() {
+            "未采集端侧画面样本，本维度不评分。".into()
+        } else {
+            format!(
+                "正面朝向比例{:.0}%，画面稳定度{:.0}%，有效出镜率{:.0}%。仅评价可观察的画面状态。",
+                gaze * 100.0,
+                posture * 100.0,
+                face_ratio * 100.0
+            )
+        },
+        evidence: Vec::new(),
+    };
+    let overall_score = weighted_overall_score([
+        (content.score, 0.30),
+        (Some(delivery_score), 0.20),
+        (Some(timing_score), 0.10),
+        (visual.score, 0.15),
+        (qa.score, 0.25),
+    ]);
 
     let payload = ReportPayload {
         session_id: session.id.clone(),
+        overall_score,
         actual_seconds,
         character_count,
         characters_per_minute,
         filler_counts,
-        long_pause_count: None,
+        long_pause_count,
+        audio_waveform,
         content,
         delivery: DimensionReport {
             score: Some(delivery_score),
             summary: format!(
-                "平均语速{characters_per_minute:.0}字/分钟，检测到{filler_total}次口头禅。"
+                "平均语速{characters_per_minute:.0}字/分钟，检测到{filler_total}次口头禅{}。",
+                long_pause_count.map_or_else(
+                    || "，未获得可用的停顿波形".to_owned(),
+                    |count| format!("、{count}次长停顿")
+                )
             ),
             evidence: Vec::new(),
         },
@@ -600,21 +710,8 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
             ),
             evidence: Vec::new(),
         },
-        visual: DimensionReport {
-            score: (!metrics.is_empty()).then_some(visual_score),
-            summary: if metrics.is_empty() {
-                "未采集端侧视觉样本，本维度不评分。".into()
-            } else {
-                format!(
-                    "居中视线比例{:.0}%，姿态稳定度{:.0}%，有效出镜率{:.0}%。",
-                    gaze * 100.0,
-                    posture * 100.0,
-                    face_ratio * 100.0
-                )
-            },
-            evidence: Vec::new(),
-        },
-        qa: qa_dimension(state, session_id).await?,
+        visual,
+        qa,
         timeline,
         suggestions,
         model_confidence: content_json.get("confidence").and_then(Value::as_f64),
@@ -638,13 +735,121 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
 }
 
 fn count_fillers(transcript: &str) -> BTreeMap<String, usize> {
-    ["然后", "就是", "那个", "其实", "嗯", "啊"]
+    ["然后", "就是", "那个", "其实", "嗯", "啊", "呃", "对吧"]
         .into_iter()
         .filter_map(|word| {
             let count = transcript.matches(word).count();
             (count > 0).then(|| (word.to_owned(), count))
         })
         .collect()
+}
+
+fn answer_improvement_suggestions(evaluation: &Value) -> Vec<String> {
+    let question = evaluation
+        .get("asked_question")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("该问题");
+    let short_question = question.chars().take(36).collect::<String>();
+    evaluation
+        .get("suggestions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .take(2)
+        .map(|item| format!("回答“{short_question}”时：{item}"))
+        .collect()
+}
+
+fn detect_long_pauses(metrics: &[session_metric::Model]) -> Option<Vec<TimelineIssue>> {
+    if metrics.len() < 8 {
+        return None;
+    }
+    let mut levels = metrics
+        .iter()
+        .map(|metric| metric.audio_level.clamp(0.0, 1.0))
+        .collect::<Vec<_>>();
+    levels.sort_by(f64::total_cmp);
+    let percentile = |fraction: f64| {
+        let index = ((levels.len() - 1) as f64 * fraction).round() as usize;
+        levels[index]
+    };
+    let noise_floor = percentile(0.20);
+    let active_level = percentile(0.80);
+    if active_level - noise_floor < 0.06 {
+        return None;
+    }
+    let silence_threshold = noise_floor + (active_level - noise_floor) * 0.24;
+    let mut issues = Vec::new();
+    let mut run_start: Option<i64> = None;
+    let mut run_end = 0_i64;
+    for metric in metrics {
+        if metric.audio_level <= silence_threshold {
+            if run_start.is_none() || metric.timestamp_ms - run_end > 750 {
+                if let Some(start) = run_start.take() {
+                    push_pause_issue(&mut issues, start, run_end);
+                }
+                run_start = Some(metric.timestamp_ms);
+            }
+            run_end = metric.timestamp_ms;
+        } else if let Some(start) = run_start.take() {
+            push_pause_issue(&mut issues, start, run_end);
+        }
+    }
+    if let Some(start) = run_start {
+        push_pause_issue(&mut issues, start, run_end);
+    }
+    Some(issues)
+}
+
+fn push_pause_issue(issues: &mut Vec<TimelineIssue>, start_ms: i64, end_ms: i64) {
+    let duration_ms = (end_ms - start_ms + 250).max(0);
+    if duration_ms < 1_500 {
+        return;
+    }
+    issues.push(TimelineIssue {
+        timestamp_ms: start_ms,
+        kind: "pause".into(),
+        message: format!("出现约{:.1}秒的长停顿", duration_ms as f64 / 1_000.0),
+    });
+}
+
+fn downsample_audio_waveform(
+    metrics: &[session_metric::Model],
+    max_points: usize,
+) -> Vec<AudioWavePoint> {
+    if metrics.is_empty() || max_points == 0 {
+        return Vec::new();
+    }
+    let stride = metrics.len().div_ceil(max_points);
+    metrics
+        .chunks(stride)
+        .map(|chunk| AudioWavePoint {
+            timestamp_ms: chunk[chunk.len() / 2].timestamp_ms,
+            level: average(chunk.iter().map(|metric| metric.audio_level)).clamp(0.0, 1.0),
+        })
+        .collect()
+}
+
+fn weighted_overall_score<const N: usize>(dimensions: [(Option<i32>, f64); N]) -> Option<i32> {
+    let (weighted, weight) =
+        dimensions
+            .into_iter()
+            .fold(
+                (0.0, 0.0),
+                |(total, used_weight), (score, item_weight)| match score {
+                    Some(score) => (
+                        total + score as f64 * item_weight,
+                        used_weight + item_weight,
+                    ),
+                    None => (total, used_weight),
+                },
+            );
+    (weight > 0.0).then(|| (weighted / weight).round().clamp(0.0, 100.0) as i32)
 }
 
 fn speed_penalty(cpm: f64) -> f64 {
@@ -706,5 +911,45 @@ mod tests {
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].chunk_id, "chunk-1");
         assert_eq!(evidence[0].quote, "端云协同架构");
+    }
+
+    #[test]
+    fn waveform_valleys_become_long_pause_issues() {
+        let levels = [0.65, 0.72, 0.04, 0.03, 0.02, 0.03, 0.04, 0.68, 0.74];
+        let metrics = levels
+            .into_iter()
+            .enumerate()
+            .map(|(index, level)| session_metric::Model {
+                id: index.to_string(),
+                session_id: "session-1".into(),
+                timestamp_ms: index as i64 * 400,
+                face_detected: true,
+                gaze_centered: 0.9,
+                posture_score: 0.9,
+                audio_level: level,
+            })
+            .collect::<Vec<_>>();
+
+        let pauses = detect_long_pauses(&metrics).expect("usable waveform");
+
+        assert_eq!(pauses.len(), 1);
+        assert_eq!(pauses[0].kind, "pause");
+    }
+
+    #[test]
+    fn overall_score_renormalizes_missing_dimensions() {
+        let score = weighted_overall_score([(Some(80), 0.5), (Some(60), 0.25), (None, 0.25)]);
+        assert_eq!(score, Some(73));
+    }
+
+    #[test]
+    fn answer_suggestions_keep_question_context_and_ignore_empty_items() {
+        let suggestions = answer_improvement_suggestions(&json!({
+            "asked_question": "如何验证端侧视觉指标的一致性？",
+            "suggestions": ["补充三端同一测试集的误差数据。", "  ", "说明抽帧频率。"]
+        }));
+
+        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions[0].starts_with("回答“如何验证端侧视觉指标的一致性？”时："));
     }
 }

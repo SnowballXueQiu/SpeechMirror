@@ -49,13 +49,23 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
         return ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 48),
           children: [
+            const DefenseStageRail(activeStage: 2),
+            const SizedBox(height: 22),
             const PageIntro(
-              eyebrow: 'EVIDENCE-BASED REVIEW',
-              title: '这一次，你说清楚了吗？',
-              description: '分数用于定位问题；内容判断必须能回到项目材料。',
+              eyebrow: 'STAGE 03 / REVIEW',
+              title: '综合答辩报告',
+              description: '结合产品陈述、端侧画面指标和AI评委问答定位本次最值得改进的问题。',
             ),
             const SizedBox(height: 24),
+            _OverallScore(score: report.overallScore),
+            const SizedBox(height: 12),
             _SummaryBand(report: report),
+            if (report.audioWaveform.isNotEmpty) ...[
+              const SizedBox(height: 26),
+              const SectionLabel('声音波形与停顿'),
+              const SizedBox(height: 12),
+              _AudioWaveform(points: report.audioWaveform),
+            ],
             const SizedBox(height: 28),
             const SectionLabel('五维分析'),
             const SizedBox(height: 8),
@@ -87,14 +97,23 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
             const SizedBox(height: 26),
             const SectionLabel('材料依据'),
             const SizedBox(height: 12),
-            if (report.content.evidence.isEmpty)
+            if (report.content.evidence.isEmpty && report.qa.evidence.isEmpty)
               const Text(
                 '本次内容评价未返回可展示的材料片段。',
                 style: TextStyle(color: AppColors.muted),
               )
-            else
+            else ...[
+              if (report.content.evidence.isNotEmpty)
+                const _EvidenceGroupLabel('陈述评价依据'),
               for (final item in report.content.evidence)
                 _EvidenceQuote(item: item),
+              if (report.qa.evidence.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                const _EvidenceGroupLabel('问答评价依据'),
+                for (final item in report.qa.evidence)
+                  _EvidenceQuote(item: item),
+              ],
+            ],
             const SizedBox(height: 26),
             const SectionLabel('下一次练习'),
             const SizedBox(height: 12),
@@ -127,6 +146,67 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       _report = report;
     });
   }
+}
+
+class _OverallScore extends StatelessWidget {
+  const _OverallScore({required this.score});
+
+  final int? score;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+    decoration: BoxDecoration(
+      color: AppColors.white,
+      border: Border.all(color: AppColors.line),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Row(
+      children: [
+        const Icon(
+          Icons.workspace_premium_outlined,
+          color: AppColors.vermilion,
+        ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Text(
+            '本次综合表现',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+        ),
+        Text(
+          score == null ? '—' : '$score',
+          style: const TextStyle(
+            fontFamily: 'Songti SC',
+            fontSize: 34,
+            fontWeight: FontWeight.w800,
+            color: AppColors.vermilion,
+          ),
+        ),
+        if (score != null)
+          const Text(' / 100', style: TextStyle(color: AppColors.muted)),
+      ],
+    ),
+  );
+}
+
+class _EvidenceGroupLabel extends StatelessWidget {
+  const _EvidenceGroupLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: AppColors.muted,
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+  );
 }
 
 class _SummaryBand extends StatelessWidget {
@@ -211,6 +291,75 @@ class _Metric extends StatelessWidget {
       ),
     ],
   );
+}
+
+class _AudioWaveform extends StatelessWidget {
+  const _AudioWaveform({required this.points});
+
+  final List<AudioWavePoint> points;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 130,
+    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+    decoration: BoxDecoration(
+      color: AppColors.white,
+      border: Border.all(color: AppColors.line),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '低谷持续约 1.5 秒以上时记为长停顿',
+          style: TextStyle(color: AppColors.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: CustomPaint(
+            painter: _AudioWaveformPainter(points),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _AudioWaveformPainter extends CustomPainter {
+  const _AudioWaveformPainter(this.points);
+
+  final List<AudioWavePoint> points;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+    final baseline = size.height / 2;
+    canvas.drawLine(
+      Offset(0, baseline),
+      Offset(size.width, baseline),
+      Paint()
+        ..color = AppColors.line
+        ..strokeWidth = 1,
+    );
+    final barWidth = size.width / points.length;
+    for (var index = 0; index < points.length; index++) {
+      final level = points[index].level.clamp(0.0, 1.0);
+      final barHeight = (3 + level * (size.height - 6)).clamp(3.0, size.height);
+      final x = index * barWidth + barWidth / 2;
+      canvas.drawLine(
+        Offset(x, baseline - barHeight / 2),
+        Offset(x, baseline + barHeight / 2),
+        Paint()
+          ..color = level < 0.12 ? AppColors.gold : AppColors.jade
+          ..strokeWidth = (barWidth * 0.48).clamp(1.0, 4.0)
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AudioWaveformPainter oldDelegate) => false;
 }
 
 class _EvidenceQuote extends StatelessWidget {

@@ -6,9 +6,9 @@
 
 - 环境：Flutter 3.35.5、Xcode 26.2、iOS 26.2 模拟器 `SpeechMirror QA`，以及 iPhone 15 Pro / iOS 26.3 Beta 真机。
 - 流程：真实登录、创建项目、材料进入知识库、DeepSeek 生成问题、提交文字回答、返回评价和连续追问，并在冷启动后恢复登录状态。
-- 构建隔离：仅 Debug 使用独立 ATS 明文 HTTP 放行；Release 与 Profile 未放行任意 HTTP。
+- 构建隔离：Debug 与真机 Profile 测试包使用独立 plist 放行当前调试 HTTP；Release 未放行任意 HTTP。
 - 产物：Simulator Debug ZIP、iPhoneOS Debug 未签名 ZIP 和 iPhoneOS Profile 公网测试签名 ZIP 均已生成并记录 SHA-256。
-- 真机结果：Personal Team 自动签名成功，应用已安装到 iPhone 并正常显示登录页；标准 Release/Profile 的 ATS 安全配置未放宽。
+- 真机结果：Personal Team 自动签名成功，应用已安装到 iPhone 并正常显示登录页；Release 的 ATS 安全配置未放宽。
 - 验证边界：模拟器无摄像头，训练页明确返回 `cameraUnavailable`；真机登录、录制、ASR 和报告闭环尚未在本记录中声明通过。
 - 完整记录：[iOS 公网包、界面回归与真机签名](ios-vps-debug-package.md)。
 

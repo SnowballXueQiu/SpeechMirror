@@ -6,10 +6,10 @@
 - 客户端：Flutter 3.35.5、Xcode 26.2、iOS 26.2 模拟器 `SpeechMirror QA`，以及 iPhone 15 Pro / iOS 26.3 Beta 真机。
 - API：`http://183.234.145.210:48180/api/v1`。
 - Bundle ID：`cn.speechmirror.speechmirror`。
-- Debug 构建使用独立 `Info-Debug.plist` 放行明文 HTTP；Release 与 Profile 继续使用不含该放行项的 `Info.plist`。
+- Debug 与真机 Profile 测试构建分别使用 `Info-Debug.plist`、`Info-Profile.plist` 放行当前无域名阶段的明文 HTTP；Release 继续使用不含该放行项的 `Info.plist`。
 - Simulator Debug ZIP：`output/ios/SpeechMirror-ios-simulator-debug-vps.zip`，SHA-256 `4bd7dc73fb0b4d81101fbbd70274796fda0aa525ac5e70a689136235903e1388`。
 - iPhoneOS Debug 未签名 ZIP：`output/ios/SpeechMirror-ios-device-debug-vps-unsigned.zip`，SHA-256 `3d6a6827d36914eeea6fccfa95209ead6e283027d426470e236ad76c51e368ba`。
-- iPhoneOS Profile 公网测试签名 ZIP：`output/ios/SpeechMirror-ios-device-profile-vps-signed.zip`，SHA-256 `97113a7789dbf06a4a0c9ce95c6cd19866d7c28d6d183d6b7982be9039c25143`。该产物仅为当前无域名 HTTP 调试临时放行 ATS；源码中的 Release 与标准 Profile 配置仍保持安全限制。
+- iPhoneOS Profile 公网测试签名 ZIP 使用独立 Profile plist 在编译签名阶段放行当前无域名 HTTP；Release 配置仍保持 ATS 安全限制。产物校验值在每次真机构建后更新。
 
 ## 实际界面流程
 

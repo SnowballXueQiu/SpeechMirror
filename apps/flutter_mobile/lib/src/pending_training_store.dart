@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'device_analysis.dart';
+
 class PendingTraining {
   const PendingTraining({
     required this.projectId,
@@ -12,6 +14,8 @@ class PendingTraining {
     required this.actualSeconds,
     required this.savedAt,
     this.transcript,
+    this.audioLevels = const [],
+    this.metricsUploaded = false,
   });
 
   final String projectId;
@@ -21,6 +25,8 @@ class PendingTraining {
   final int actualSeconds;
   final DateTime savedAt;
   final String? transcript;
+  final List<AudioLevelSample> audioLevels;
+  final bool metricsUploaded;
 
   PendingTraining withTranscript(String value) => PendingTraining(
     projectId: projectId,
@@ -30,6 +36,20 @@ class PendingTraining {
     actualSeconds: actualSeconds,
     savedAt: savedAt,
     transcript: value,
+    audioLevels: audioLevels,
+    metricsUploaded: metricsUploaded,
+  );
+
+  PendingTraining withMetricsUploaded() => PendingTraining(
+    projectId: projectId,
+    sessionId: sessionId,
+    audioPath: audioPath,
+    videoPath: videoPath,
+    actualSeconds: actualSeconds,
+    savedAt: savedAt,
+    transcript: transcript,
+    audioLevels: audioLevels,
+    metricsUploaded: true,
   );
 
   Map<String, dynamic> toJson() => {
@@ -40,6 +60,8 @@ class PendingTraining {
     'actual_seconds': actualSeconds,
     'saved_at': savedAt.toUtc().toIso8601String(),
     'transcript': transcript,
+    'audio_levels': audioLevels.map((sample) => sample.toJson()).toList(),
+    'metrics_uploaded': metricsUploaded,
   };
 
   factory PendingTraining.fromJson(Map<String, dynamic> json) {
@@ -66,6 +88,11 @@ class PendingTraining {
       actualSeconds: actualSeconds,
       savedAt: savedAt,
       transcript: json['transcript'] as String?,
+      audioLevels: (json['audio_levels'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(AudioLevelSample.fromJson)
+          .toList(),
+      metricsUploaded: json['metrics_uploaded'] as bool? ?? false,
     );
   }
 }

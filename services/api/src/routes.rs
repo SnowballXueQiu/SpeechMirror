@@ -513,6 +513,11 @@ async fn upload_metrics(
     if body.samples.len() > 20_000 {
         return Err(ApiError::BadRequest("too many metric samples".into()));
     }
+    let transaction = state.db.begin().await?;
+    session_metric::Entity::delete_many()
+        .filter(session_metric::Column::SessionId.eq(&session_id))
+        .exec(&transaction)
+        .await?;
     for sample in body.samples {
         for value in [
             sample.gaze_centered,
@@ -534,9 +539,10 @@ async fn upload_metrics(
             posture_score: Set(sample.posture_score),
             audio_level: Set(sample.audio_level),
         }
-        .insert(&state.db)
+        .insert(&transaction)
         .await?;
     }
+    transaction.commit().await?;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -670,13 +676,21 @@ async fn generate_questions(
 ) -> ApiResult<Json<Vec<QuestionResponse>>> {
     owned_project(&state, &user.id, &project_id).await?;
     let count = body.count.clamp(1, 10);
-    if let Some(ref session_id) = body.session_id {
-        owned_session(&state, &user.id, session_id).await?;
-    }
+    let presentation = if let Some(ref session_id) = body.session_id {
+        let session = owned_session(&state, &user.id, session_id).await?;
+        session
+            .transcript
+            .unwrap_or_default()
+            .chars()
+            .take(6_000)
+            .collect::<String>()
+    } else {
+        String::new()
+    };
     let chunks = retrieve_chunks(
         &state,
         &project_id,
-        "项目背景 技术方案 创新点 实验结果 局限性 风险",
+        &format!("项目背景 技术方案 创新点 实验结果 局限性 风险 {presentation}"),
         16,
     )
     .await?;
@@ -697,7 +711,7 @@ async fn generate_questions(
         if missing.is_empty() {
             break;
         }
-        let prompt = question_generation_prompt(&material, &missing);
+        let prompt = question_generation_prompt(&material, &presentation, &missing);
         let value = state
             .ai
             .chat_json("你是严格但建设性的计算机应用大赛评委。", &prompt)
@@ -771,9 +785,14 @@ fn missing_question_categories<'a>(
         .collect()
 }
 
-fn question_generation_prompt(material: &str, missing: &[&str]) -> String {
+fn question_generation_prompt(material: &str, presentation: &str, missing: &[&str]) -> String {
+    let presentation = if presentation.trim().is_empty() {
+        "（没有可用的现场陈述转写）"
+    } else {
+        presentation
+    };
     format!(
-        "请根据材料生成{}个中文答辩问题。类别必须依次为：{}。每个问题的category必须逐字使用对应类别；question不能为空；evidence至少包含一项；chunk_id必须复制材料方括号中的编号；quote必须是对应材料中的连续原文，不得改写或概括。只返回JSON：{{\"questions\":[{{\"category\":\"技术\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n材料：\n{material}",
+        "请结合项目材料和学生刚才的现场陈述，生成{}个关键、适度的中文答辩问题。优先追问陈述中含糊、遗漏、与材料不一致或缺少验证的部分，不要机械复述材料。类别必须依次为：{}。每个问题的category必须逐字使用对应类别；question不能为空；evidence至少包含一项；chunk_id必须复制材料方括号中的编号；quote必须是对应材料中的连续原文，不得改写或概括。只返回JSON：{{\"questions\":[{{\"category\":\"技术\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n现场陈述转写：\n{presentation}\n\n项目材料：\n{material}",
         missing.len(),
         missing.join("、"),
         missing.len(),
@@ -930,7 +949,7 @@ async fn submit_answer(
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = format!(
-        "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n项目材料：\n{}\n只返回JSON，字段为score(0-100整数)、relevance、accuracy、evidence数组、suggestions数组、follow_up。evidence每项必须含chunk_id和对应材料中的连续原文quote。follow_up必须是基于本轮回答和材料的非空中文追问。评价必须以材料为准，并指出没有依据的表述。",
+        "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n项目材料：\n{}\n只返回JSON，字段为score(0-100整数)、expression_score(0-100整数)、adaptability_score(0-100整数)、familiarity_score(0-100整数)、completeness_score(0-100整数)、relevance、accuracy、evidence数组、suggestions数组、follow_up。evidence每项必须含chunk_id和对应材料中的连续原文quote。只有回答存在关键缺口、矛盾或需要澄清时才给出一个简短中文follow_up，否则follow_up为null。评价必须以材料为准，兼顾表达清晰度、随机应变、项目熟悉程度和回答完整性，并指出没有依据的表述。",
         question.question, previous_turn, asked_question, body.answer_text, material
     );
     let mut evaluation = state
@@ -953,9 +972,7 @@ async fn submit_answer(
         .ok_or_else(|| ApiError::Internal("AI answer evaluation did not contain a score".into()))?
         .clamp(0, 100);
     evaluation_object.insert("score".into(), json!(score));
-    let follow_up = normalized_follow_up(&evaluation).ok_or_else(|| {
-        ApiError::Internal("AI answer evaluation did not contain a valid follow-up".into())
-    })?;
+    let follow_up = normalized_follow_up(&evaluation);
     let evaluation_object = evaluation
         .as_object_mut()
         .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
@@ -1010,15 +1027,14 @@ async fn get_trends(
             .filter(report::Column::SessionId.eq(&session.id))
             .one(&state.db)
             .await?
+            && let Ok(payload) = serde_json::from_value::<ReportPayload>(model.report_json)
         {
-            if let Ok(payload) = serde_json::from_value::<ReportPayload>(model.report_json) {
-                points.push(build_trend_point(
-                    session.id,
-                    session.target_seconds,
-                    model.created_at,
-                    payload,
-                ));
-            }
+            points.push(build_trend_point(
+                session.id,
+                session.target_seconds,
+                model.created_at,
+                payload,
+            ));
         }
     }
     Ok(Json(TrendsResponse { project_id, points }))
@@ -1344,11 +1360,13 @@ mod route_tests {
     fn derives_trend_metrics_from_a_persisted_report() {
         let payload = ReportPayload {
             session_id: "session-1".into(),
+            overall_score: Some(80),
             actual_seconds: 330,
             character_count: 900,
             characters_per_minute: 163.6,
             filler_counts: BTreeMap::from([("然后".into(), 2), ("嗯".into(), 1)]),
             long_pause_count: Some(1),
+            audio_waveform: vec![],
             content: dimension(Some(84)),
             delivery: dimension(Some(78)),
             timing: dimension(Some(90)),
@@ -1373,11 +1391,13 @@ mod route_tests {
     fn keeps_zero_duration_trend_finite() {
         let payload = ReportPayload {
             session_id: "session-2".into(),
+            overall_score: None,
             actual_seconds: 0,
             character_count: 0,
             characters_per_minute: 0.0,
             filler_counts: BTreeMap::from([("嗯".into(), 1)]),
             long_pause_count: None,
+            audio_waveform: vec![],
             content: dimension(None),
             delivery: dimension(None),
             timing: dimension(None),

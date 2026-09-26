@@ -18,11 +18,16 @@ void main() {
     final report = RehearsalReport.fromJson({
       'report': {
         'session_id': 'session-1',
+        'overall_score': 86,
         'actual_seconds': 300,
         'character_count': 900,
         'characters_per_minute': 180.0,
         'filler_counts': {'然后': 2},
         'long_pause_count': null,
+        'audio_waveform': [
+          {'timestamp_ms': 250, 'level': 0.42},
+          {'timestamp_ms': 500, 'level': 0.71},
+        ],
         'content': {
           'score': 82,
           'summary': '覆盖了技术路线',
@@ -41,6 +46,9 @@ void main() {
     });
 
     expect(report.sessionId, 'session-1');
+    expect(report.overallScore, 86);
+    expect(report.audioWaveform.length, 2);
+    expect(report.audioWaveform.last.level, 0.71);
     expect(report.fillerCounts['然后'], 2);
     expect(report.longPauseCount, isNull);
     expect(report.content.evidence.single.chunkId, 'chunk-1');

@@ -56,6 +56,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => JuryScreen(
           projectId: state.pathParameters['id']!,
           sessionId: state.uri.queryParameters['session'],
+          autoStart: state.uri.queryParameters['autostart'] == '1',
         ),
       ),
       GoRoute(

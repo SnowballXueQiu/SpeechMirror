@@ -308,11 +308,12 @@ class ApiClient {
   Future<List<JuryQuestion>> generateQuestions(
     String projectId, {
     String? sessionId,
+    int count = 5,
   }) async {
     final response = await _authorized(
       () => _dio.post<List<dynamic>>(
         '/projects/$projectId/questions',
-        data: {'session_id': sessionId, 'count': 5},
+        data: {'session_id': sessionId, 'count': count.clamp(1, 10)},
       ),
     );
     return response.data!

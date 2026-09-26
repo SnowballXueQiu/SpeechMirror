@@ -209,7 +209,29 @@ components:
     CompleteSession: {type: object, required: [actual_seconds], properties: {actual_seconds: {type: integer, minimum: 1, maximum: 3600}, transcript: {type: [string, 'null']}}}
     Evidence: {type: object, required: [chunk_id, quote], properties: {chunk_id: {type: string, format: uuid}, quote: {type: string}}}
     Dimension: {type: object, required: [score, summary, evidence], properties: {score: {type: [integer, 'null'], minimum: 0, maximum: 100, description: 未采集或未完成时为null}, summary: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}}}
-    ReportEnvelope: {type: object, required: [id, session_id, report, created_at], properties: {id: {type: string, format: uuid}, session_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}, report: {type: object, additionalProperties: true}}}
+    AudioWavePoint: {type: object, required: [timestamp_ms, level], properties: {timestamp_ms: {type: integer, format: int64}, level: {type: number, minimum: 0, maximum: 1}}}
+    TimelineIssue: {type: object, required: [timestamp_ms, kind, message], properties: {timestamp_ms: {type: integer, format: int64}, kind: {type: string}, message: {type: string}}}
+    ReportPayload:
+      type: object
+      required: [session_id, actual_seconds, character_count, characters_per_minute, filler_counts, long_pause_count, content, delivery, timing, visual, qa, timeline, suggestions, model_confidence]
+      properties:
+        session_id: {type: string, format: uuid}
+        overall_score: {type: [integer, 'null'], minimum: 0, maximum: 100}
+        actual_seconds: {type: integer}
+        character_count: {type: integer, minimum: 0}
+        characters_per_minute: {type: number, minimum: 0}
+        filler_counts: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        long_pause_count: {type: [integer, 'null'], minimum: 0}
+        audio_waveform: {type: array, items: {$ref: '#/components/schemas/AudioWavePoint'}}
+        content: {$ref: '#/components/schemas/Dimension'}
+        delivery: {$ref: '#/components/schemas/Dimension'}
+        timing: {$ref: '#/components/schemas/Dimension'}
+        visual: {$ref: '#/components/schemas/Dimension'}
+        qa: {$ref: '#/components/schemas/Dimension'}
+        timeline: {type: array, items: {$ref: '#/components/schemas/TimelineIssue'}}
+        suggestions: {type: array, items: {type: string}}
+        model_confidence: {type: [number, 'null'], minimum: 0, maximum: 1}
+    ReportEnvelope: {type: object, required: [id, session_id, report, created_at], properties: {id: {type: string, format: uuid}, session_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}, report: {$ref: '#/components/schemas/ReportPayload'}}}
     Question: {type: object, required: [id, project_id, category, question, evidence, created_at], properties: {id: {type: string, format: uuid}, project_id: {type: string, format: uuid}, session_id: {type: [string, 'null'], format: uuid}, category: {type: string}, question: {type: string}, evidence: {type: array, items: {$ref: '#/components/schemas/Evidence'}}, created_at: {type: string, format: date-time}}}
     AnswerInput: {type: object, required: [session_id, answer_text], properties: {session_id: {type: string, format: uuid}, answer_text: {type: string, minLength: 1}, parent_answer_id: {type: [string, 'null'], format: uuid, description: 回答上一轮服务端生成的追问时传入}}}
     Answer: {type: object, required: [id, question_id, session_id, asked_question, parent_answer_id, answer_text, evaluation, created_at], properties: {id: {type: string, format: uuid}, question_id: {type: string, format: uuid}, session_id: {type: string, format: uuid}, asked_question: {type: string}, parent_answer_id: {type: [string, 'null'], format: uuid}, answer_text: {type: string}, evaluation: {type: object, additionalProperties: true}, created_at: {type: string, format: date-time}}}
