@@ -1206,8 +1206,9 @@ fn enrich_answer_feedback(
         .chars()
         .filter(|character| !character.is_whitespace())
         .count();
-    let needs_follow_up =
-        allow_follow_up && answer_length < 80 && normalized_follow_up(evaluation).is_none();
+    let needs_follow_up = allow_follow_up
+        && (answer_length < 80 || material_overlap_count(answer_text, evidence) == 0)
+        && normalized_follow_up(evaluation).is_none();
     let Some(object) = evaluation.as_object_mut() else {
         return;
     };
