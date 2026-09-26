@@ -687,6 +687,22 @@ async fn generate_questions(
     } else {
         String::new()
     };
+    if let Some(ref session_id) = body.session_id {
+        let existing = jury_question::Entity::find()
+            .filter(jury_question::Column::ProjectId.eq(&project_id))
+            .filter(jury_question::Column::SessionId.eq(session_id))
+            .order_by_asc(jury_question::Column::CreatedAt)
+            .all(&state.db)
+            .await?;
+        if existing.len() >= count {
+            return existing
+                .into_iter()
+                .take(count)
+                .map(question_response)
+                .collect::<ApiResult<Vec<_>>>()
+                .map(Json);
+        }
+    }
     let chunks = retrieve_chunks(
         &state,
         &project_id,

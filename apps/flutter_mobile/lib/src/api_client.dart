@@ -410,12 +410,24 @@ class ApiClient {
   }
 
   String _errorMessage(DioException error) {
+    if (error.response == null) {
+      return switch (error.type) {
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout ||
+        DioExceptionType.connectionError => '网络连接中断，请检查网络后重试',
+        _ => '网络请求未完成，请稍后重试',
+      };
+    }
     final data = error.response?.data;
     final body = data is Map ? data : const <String, dynamic>{};
     return switch (body['code']) {
       'unauthorized' => '用户名或密码错误，或登录已过期',
       'conflict' => '该用户名已被使用',
       'bad_request' => body['message']?.toString() ?? '请检查输入内容',
+      'internal_error' => 'AI服务暂时未完成请求，请稍后重试',
+      'ai_not_configured' => 'AI服务尚未配置完成',
+      'not_found' => '请求的数据不存在或已被删除',
       _ => body['message']?.toString() ?? error.message ?? '网络请求失败',
     };
   }

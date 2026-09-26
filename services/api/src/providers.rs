@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
+use reqwest::StatusCode;
 use serde_json::{Value, json};
 
 use crate::{
@@ -58,23 +59,40 @@ impl AiClient {
 
     pub async fn chat_json(&self, system: &str, user: &str) -> ApiResult<Value> {
         let provider = &self.config.llm;
-        let response = self
-            .http
-            .post(self.endpoint(provider, "chat/completions"))
-            .bearer_auth(self.api_key(provider)?)
-            .json(&json!({
-                "model": provider.model,
-                "temperature": 0.2,
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user}
-                ]
-            }))
-            .send()
-            .await
-            .map_err(internal)?;
-        let body = checked_json(response).await?;
+        let request_body = json!({
+            "model": provider.model,
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ]
+        });
+        let mut attempt = 0_u32;
+        let body = loop {
+            attempt += 1;
+            let response = self
+                .http
+                .post(self.endpoint(provider, "chat/completions"))
+                .timeout(std::time::Duration::from_secs(35))
+                .bearer_auth(self.api_key(provider)?)
+                .json(&request_body)
+                .send()
+                .await;
+            match response {
+                Ok(response)
+                    if retryable_status(response.status()) && attempt < CHAT_REQUEST_ATTEMPTS =>
+                {
+                    tracing::warn!(attempt, status = %response.status(), "retrying AI chat request");
+                }
+                Ok(response) => break checked_json(response).await?,
+                Err(error) if attempt < CHAT_REQUEST_ATTEMPTS => {
+                    tracing::warn!(attempt, error = %error, "retrying AI chat request");
+                }
+                Err(error) => return Err(internal(error)),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(350 * u64::from(attempt))).await;
+        };
         let content = body
             .pointer("/choices/0/message/content")
             .and_then(Value::as_str)
@@ -180,6 +198,21 @@ impl AiClient {
     }
 }
 
+const CHAT_REQUEST_ATTEMPTS: u32 = 3;
+
+fn retryable_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::REQUEST_TIMEOUT
+            | StatusCode::TOO_EARLY
+            | StatusCode::TOO_MANY_REQUESTS
+            | StatusCode::INTERNAL_SERVER_ERROR
+            | StatusCode::BAD_GATEWAY
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
 fn audio_input_metadata(bytes: &[u8], filename: &str) -> ApiResult<(&'static str, &'static str)> {
     if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WAVE" {
         return Ok(("audio/wav", "wav"));
@@ -273,5 +306,13 @@ mod tests {
             parse_json_content("```json\n{\"ok\":true}\n```").unwrap(),
             json!({"ok": true})
         );
+    }
+
+    #[test]
+    fn retries_only_transient_provider_statuses() {
+        assert!(retryable_status(StatusCode::BAD_GATEWAY));
+        assert!(retryable_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(!retryable_status(StatusCode::BAD_REQUEST));
+        assert!(!retryable_status(StatusCode::UNAUTHORIZED));
     }
 }

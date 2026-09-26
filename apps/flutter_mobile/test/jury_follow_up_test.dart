@@ -63,6 +63,43 @@ void main() {
     expect(api.parentAnswerIds, [null, 'answer-1']);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('retries question generation without exposing finish action', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _RetryingJuryApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: const MaterialApp(
+          home: JuryScreen(
+            projectId: 'project-1',
+            sessionId: 'session-1',
+            autoStart: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('AI服务暂时未完成请求，请稍后重试'), findsOneWidget);
+    expect(find.text('重试生成问题'), findsOneWidget);
+    expect(find.byTooltip('结束答辩'), findsNothing);
+
+    await tester.tap(find.text('重试生成问题'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('如何保护原始视频？'), findsOneWidget);
+    expect(find.byTooltip('结束答辩'), findsOneWidget);
+    expect(api.generationAttempts, 2);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _JuryApiClient extends ApiClient {
@@ -105,5 +142,22 @@ class _JuryApiClient extends ApiClient {
         'follow_up': secondTurn ? null : '如何证明服务端没有原始视频？',
       },
     );
+  }
+}
+
+class _RetryingJuryApiClient extends _JuryApiClient {
+  int generationAttempts = 0;
+
+  @override
+  Future<List<JuryQuestion>> generateQuestions(
+    String projectId, {
+    String? sessionId,
+    int count = 5,
+  }) async {
+    generationAttempts += 1;
+    if (generationAttempts == 1) {
+      throw const ApiException('AI服务暂时未完成请求，请稍后重试');
+    }
+    return listQuestions(projectId);
   }
 }

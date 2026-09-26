@@ -787,21 +787,23 @@ fn detect_long_pauses(metrics: &[session_metric::Model]) -> Option<Vec<TimelineI
     let mut issues = Vec::new();
     let mut run_start: Option<i64> = None;
     let mut run_end = 0_i64;
+    let mut speech_started = false;
     for metric in metrics {
-        if metric.audio_level <= silence_threshold {
+        let silent = metric.audio_level <= silence_threshold;
+        if !speech_started {
+            if !silent {
+                speech_started = true;
+            }
+            continue;
+        }
+        if silent {
             if run_start.is_none() || metric.timestamp_ms - run_end > 750 {
-                if let Some(start) = run_start.take() {
-                    push_pause_issue(&mut issues, start, run_end);
-                }
                 run_start = Some(metric.timestamp_ms);
             }
             run_end = metric.timestamp_ms;
         } else if let Some(start) = run_start.take() {
             push_pause_issue(&mut issues, start, run_end);
         }
-    }
-    if let Some(start) = run_start {
-        push_pause_issue(&mut issues, start, run_end);
     }
     Some(issues)
 }
@@ -915,7 +917,10 @@ mod tests {
 
     #[test]
     fn waveform_valleys_become_long_pause_issues() {
-        let levels = [0.65, 0.72, 0.04, 0.03, 0.02, 0.03, 0.04, 0.68, 0.74];
+        let levels = [
+            0.03, 0.02, 0.04, 0.65, 0.72, 0.04, 0.03, 0.02, 0.03, 0.04, 0.68, 0.74, 0.03, 0.02,
+            0.04, 0.03,
+        ];
         let metrics = levels
             .into_iter()
             .enumerate()
@@ -934,6 +939,7 @@ mod tests {
 
         assert_eq!(pauses.len(), 1);
         assert_eq!(pauses[0].kind, "pause");
+        assert_eq!(pauses[0].timestamp_ms, 2_000);
     }
 
     #[test]

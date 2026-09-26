@@ -93,6 +93,16 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     }
   }
 
+  Future<void> _retryInitialization() async {
+    if (_loading) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+      _questions = const [];
+    });
+    await _initialize();
+  }
+
   Future<void> _configureSpeech() async {
     await _tts.setLanguage('zh-CN');
     await _tts.setSpeechRate(0.46);
@@ -311,17 +321,21 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
         appBar: AppBar(
           title: const Text('模拟答辩'),
           actions: [
-            IconButton(
-              tooltip: '结束答辩',
-              onPressed: _loading || busy ? null : _finish,
-              icon: const Icon(Icons.stop_circle_outlined),
-            ),
+            if (_questions.isNotEmpty)
+              IconButton(
+                tooltip: '结束答辩',
+                onPressed: _loading || busy ? null : _finish,
+                icon: const Icon(Icons.stop_circle_outlined),
+              ),
           ],
         ),
         body: _loading
-            ? _LoadingJury(error: _error)
+            ? const _LoadingJury()
             : _questions.isEmpty
-            ? _LoadingJury(error: _error ?? '未能生成有效的评委问题')
+            ? _LoadingJury(
+                error: _error ?? '未能生成有效的评委问题',
+                onRetry: _retryInitialization,
+              )
             : ListView(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 48),
                 children: [
@@ -446,9 +460,10 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
 }
 
 class _LoadingJury extends StatelessWidget {
-  const _LoadingJury({this.error});
+  const _LoadingJury({this.error, this.onRetry});
 
   final String? error;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -471,6 +486,14 @@ class _LoadingJury extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
+          if (error != null && onRetry != null) ...[
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('重试生成问题'),
+            ),
+          ],
         ],
       ),
     ),
