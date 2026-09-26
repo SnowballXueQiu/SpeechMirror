@@ -7,6 +7,7 @@
 - [x] 推送仓库基线到 GitHub `main` 分支。
 - [x] 使用 Xcode/iOS Simulator 构建并启动 Flutter 登录页，确认 Xcode Debugger 已附加。
 - [x] 构建直连公网 VPS 的 iOS Debug 包，仅在 Debug 放行 HTTP；在 iOS 26.2 模拟器完成登录、项目、材料状态、AI 提问与文字评议回归。
+- [x] 使用 Personal Team 为 iPhone 15 Pro / iOS 26.3 Beta 完成自动签名，安装并启动 Profile 公网测试包，确认真机登录页显示正常。
 - [x] 安装 Flutter 87.1 与 Dart 251.25410.28 插件，使用 Android Studio Debug 在 `SpeechMirror_QA` 模拟器启动登录页并保存截图。
 - [x] 完成注册、登录、令牌刷新、退出撤销与移动端安全存储闭环。
 - [x] 完成项目创建、读取、编辑、永久删除及返回列表刷新，并在 Android Studio 与 Xcode 中实测。
