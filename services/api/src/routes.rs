@@ -1082,8 +1082,8 @@ fn fill_fallback_question_candidates_with_history(
             ("技术", _) => {
                 format!("采用“{anchor}”的理由是什么，替代方案为何未选？")
             }
-            ("应用", 0) => format!("“{anchor}”解决目标用户的哪一步，如何验证有效？"),
-            ("应用", _) => format!("用户在“{anchor}”流程之外操作时，系统如何处理？"),
+            ("应用", 0) => format!("“{anchor}”给目标用户带来什么可观察价值，如何验证？"),
+            ("应用", _) => format!("“{anchor}”在真实使用场景的哪一步发挥作用？"),
             ("创新", 0) => format!("“{anchor}”相对常见方案的具体差异是什么？"),
             ("创新", _) => format!("“{anchor}”的创新依据是什么，有什么可复现对照？"),
             ("风险", 0) => format!("“{anchor}”在哪种条件下会失效，验证结果是什么？"),
@@ -1976,6 +1976,32 @@ mod route_tests {
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].question.chars().count() <= 100);
         assert!(candidates[0].evidence[0].quote.chars().count() > 28);
+    }
+
+    #[test]
+    fn fallback_questions_fill_all_core_categories_from_one_chunk() {
+        let chunks = vec![crate::entities::document_chunk::Model {
+            id: "chunk-1".into(),
+            document_id: "document-1".into(),
+            project_id: "project-1".into(),
+            ordinal: 0,
+            content: "SpeechMirror（言镜）面向大学生答辩训练。Flutter负责iOS与Android客户端，HarmonyOS 6使用ArkTS和ArkUI原生实现。后端使用Rust、Axum、SeaORM和SQLite WAL。用户上传论文、PPTX、DOCX、文本或图片后，系统先解析材料、分块并使用Embedding建立项目知识库。AI评委根据当前项目知识库生成技术、应用、创新、风险和质疑问题。回答评价必须引用连续材料原文，区分已覆盖要点、缺失要点和无依据说法。训练时原始视频保存在手机本地，音频只用于临时ASR，端侧只上传派生视觉指标。".into(),
+            embedding: None,
+        }];
+        let plan = question_category_plan(5);
+        let mut candidates = Vec::new();
+
+        fill_fallback_question_candidates_with_history(
+            &plan,
+            &chunks,
+            &mut candidates,
+            "session-one",
+            &[],
+            &[],
+        );
+
+        assert_eq!(candidates.len(), 5);
+        assert!(order_question_candidates(&plan, candidates).len() == 5);
     }
 
     #[test]
