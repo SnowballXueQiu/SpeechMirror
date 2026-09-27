@@ -974,20 +974,53 @@ fn best_evidence_quote_excluding(
 }
 
 fn evidence_anchor(quote: &str) -> String {
-    let first_sentence = quote
-        .split(['。', '！', '？', '!', '?', ';', '；', '\n'])
-        .find(|part| !part.trim().is_empty())
-        .unwrap_or(quote)
-        .trim()
-        .trim_matches(['"', '“', '”', '「', '」']);
-    let mut anchor = first_sentence.chars().take(28).collect::<String>();
-    if first_sentence.chars().count() > 28 {
-        anchor.push('…');
+    let clauses = quote
+        .split(['。', '！', '？', '!', '?', ';', '；', '\n', '，', ','])
+        .map(str::trim)
+        .map(|part| part.trim_matches(['"', '“', '”', '「', '」']))
+        .filter(|part| part.chars().count() >= 6)
+        .collect::<Vec<_>>();
+    let mut anchor = clauses
+        .iter()
+        .filter(|part| {
+            [
+                "采用",
+                "使用",
+                "后端",
+                "知识库",
+                "评委",
+                "端侧",
+                "视频",
+                "用户",
+                "输入",
+                "输出",
+                "验证",
+            ]
+            .iter()
+            .any(|keyword| part.contains(keyword))
+        })
+        .max_by_key(|part| part.chars().count())
+        .copied()
+        .or_else(|| {
+            clauses
+                .iter()
+                .max_by_key(|part| part.chars().count())
+                .copied()
+        })
+        .unwrap_or(quote.trim());
+    for prefix in ["SpeechMirror", "系统", "项目", "本项目"] {
+        if let Some(stripped) = anchor.strip_prefix(prefix) {
+            anchor = stripped.trim_start_matches(['使', '用', '采', '用', '先']);
+        }
     }
-    if anchor.chars().count() < 8 {
-        quote.chars().take(28).collect()
+    let mut shortened = anchor.chars().take(32).collect::<String>();
+    if anchor.chars().count() > 32 {
+        shortened.push('…');
+    }
+    if shortened.chars().count() < 6 {
+        quote.chars().take(32).collect()
     } else {
-        anchor
+        shortened
     }
 }
 
@@ -1045,28 +1078,18 @@ fn fill_fallback_question_candidates_with_history(
         let anchor = evidence_anchor(&evidence.quote);
         let variant = (offset + index) % 2;
         let question = match (category, variant) {
-            ("技术", 0) => format!("围绕“{anchor}”，这一环节的输入、处理和输出分别是什么？"),
+            ("技术", 0) => format!("“{anchor}”的输入、处理和输出分别是什么？"),
             ("技术", _) => {
-                format!("你为什么采用“{anchor}”对应的技术方案，替代方案被舍弃的依据是什么？")
+                format!("采用“{anchor}”的理由是什么，替代方案为何未选？")
             }
-            ("应用", 0) => {
-                format!("“{anchor}”在目标用户的哪一步实际使用，你用什么结果判断它有效？")
-            }
-            ("应用", _) => {
-                format!("如果用户不按预设流程使用“{anchor}”，产品如何处理，当前是否验证过？")
-            }
-            ("创新", 0) => {
-                format!("“{anchor}”与常见做法相比具体少了或增加了哪一步，差异带来什么结果？")
-            }
-            ("创新", _) => format!("你把“{anchor}”称为创新的依据是什么，有没有可复现的对照？"),
-            ("风险", 0) => format!("“{anchor}”最可能在哪种条件下失效，你目前做了什么验证？"),
-            ("风险", _) => {
-                format!("如果“{anchor}”的关键依赖不可用，系统会出现什么可观察的降级结果？")
-            }
-            ("质疑", 0) => format!("“{anchor}”的适用边界是什么，材料中哪些结论目前还不能推出？"),
-            ("质疑", _) => {
-                format!("评委如何复核“{anchor}”这一说法，你能指出一个具体证据或限制吗？")
-            }
+            ("应用", 0) => format!("“{anchor}”解决目标用户的哪一步，如何验证有效？"),
+            ("应用", _) => format!("用户在“{anchor}”流程之外操作时，系统如何处理？"),
+            ("创新", 0) => format!("“{anchor}”相对常见方案的具体差异是什么？"),
+            ("创新", _) => format!("“{anchor}”的创新依据是什么，有什么可复现对照？"),
+            ("风险", 0) => format!("“{anchor}”在哪种条件下会失效，验证结果是什么？"),
+            ("风险", _) => format!("“{anchor}”的关键依赖不可用时，系统如何降级？"),
+            ("质疑", 0) => format!("“{anchor}”的适用边界是什么？"),
+            ("质疑", _) => format!("评委如何复核“{anchor}”，对应证据是什么？"),
             _ => format!("围绕“{anchor}”，请给出一个可核验的实现或结果。"),
         };
         if !candidate_is_novel(
