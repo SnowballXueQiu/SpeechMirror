@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod auth;
 pub mod config;
+pub mod defense;
 pub mod entities;
 pub mod error;
 pub mod migration;

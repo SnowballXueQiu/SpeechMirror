@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
+    defense::content_system_prompt,
     entities::{document, document_chunk, jury_answer, rehearsal_session, report, session_metric},
     error::{ApiError, ApiResult},
     models::{AudioWavePoint, DimensionReport, EvidenceRef, ReportPayload, TimelineIssue},
@@ -547,21 +548,14 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         visible.len() as f64 / metrics.len() as f64
     };
 
-    let chunks = retrieve_chunks(state, &session.project_id, &transcript, 10).await?;
-    let material = chunks
-        .iter()
-        .map(|chunk| format!("[{}] {}", chunk.id, chunk.content))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let chunks = retrieve_chunks(state, &session.project_id, &transcript, 12).await?;
+    let material = material_context(&chunks);
     let prompt = format!(
-        "项目材料：\n{material}\n\n答辩转写：\n{transcript}\n\n请只返回JSON，字段为score(0-100整数)、summary、evidence数组（每项含chunk_id和quote）、suggestions数组、confidence(0-1)。评价答辩是否准确覆盖项目背景、方案、创新点、验证与局限；证据必须引用给出的材料编号，不能编造。"
+        "项目材料：\n{material}\n\n答辩转写：\n{transcript}\n\n请只返回JSON，字段为score(0-100整数)、summary、covered_points数组、missing_points数组、unsupported_claims数组、evidence数组（每项含chunk_id和完整quote）、suggestions数组、confidence(0-1)。先建立材料事实清单，再评价陈述覆盖了哪些事实、遗漏哪些事实、是否有矛盾或无依据断言；证据必须引用给出的材料编号和连续完整原文，不能编造。suggestions逐条对应missing_points或unsupported_claims，必须给出具体补救动作。"
     );
     let mut content_json = match state
         .ai
-        .chat_json_fast(
-            "你是严谨的大学生计算机应用大赛答辩评委，只评价可由材料验证的内容。",
-            &prompt,
-        )
+        .chat_json_fast(&content_system_prompt(), &prompt)
         .await
     {
         Ok(value) => value,
@@ -767,6 +761,98 @@ fn count_fillers(transcript: &str) -> BTreeMap<String, usize> {
         .collect()
 }
 
+fn material_context(chunks: &[document_chunk::Model]) -> String {
+    chunks
+        .iter()
+        .map(|chunk| {
+            let units = evidence_units(&chunk.content)
+                .into_iter()
+                .map(|unit| format!("    - {unit}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("[{}]\n{}", chunk.id, units)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn evidence_units(content: &str) -> Vec<String> {
+    let mut units = Vec::new();
+    let mut pending = String::new();
+    for character in content.chars() {
+        pending.push(character);
+        if matches!(
+            character,
+            '。' | '！' | '？' | '!' | '?' | ';' | '；' | '\n'
+        ) && pending.trim().chars().count() >= 8
+        {
+            units.push(pending.trim().to_owned());
+            pending.clear();
+        }
+    }
+    if !pending.trim().is_empty() {
+        units.push(pending.trim().to_owned());
+    }
+    if units.is_empty() {
+        vec![content.trim().to_owned()]
+    } else {
+        units
+    }
+}
+
+fn best_evidence_quote(
+    chunks: &[document_chunk::Model],
+    query: &str,
+    offset: usize,
+) -> Option<EvidenceRef> {
+    let candidates = chunks
+        .iter()
+        .flat_map(|chunk| {
+            evidence_units(&chunk.content)
+                .into_iter()
+                .filter(|unit| unit.chars().count() >= 8)
+                .map(|quote| (chunk.id.clone(), quote))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return None;
+    }
+    let best_score = candidates
+        .iter()
+        .map(|(_, quote)| pair_overlap_count(query, quote))
+        .max()
+        .unwrap_or_default();
+    let index = if best_score == 0 {
+        offset % candidates.len()
+    } else {
+        candidates
+            .iter()
+            .position(|(_, quote)| pair_overlap_count(query, quote) == best_score)
+            .unwrap_or(offset % candidates.len())
+    };
+    let (chunk_id, quote) = &candidates[index];
+    Some(EvidenceRef {
+        chunk_id: chunk_id.clone(),
+        quote: quote.clone(),
+    })
+}
+
+fn pair_overlap_count(left: &str, right: &str) -> usize {
+    let left = left
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    left.windows(2)
+        .filter_map(|pair| {
+            let token = pair.iter().collect::<String>();
+            right.contains(&token).then_some(token)
+        })
+        .filter(|token| seen.insert(token.clone()))
+        .count()
+}
+
 fn fallback_content_evaluation(transcript: &str, chunks: &[document_chunk::Model]) -> Value {
     let character_count = transcript
         .chars()
@@ -779,23 +865,28 @@ fn fallback_content_evaluation(transcript: &str, chunks: &[document_chunk::Model
     } else {
         28
     };
-    let evidence = chunks
-        .first()
-        .map(|chunk| {
-            json!([{
-                "chunk_id": chunk.id,
-                "quote": chunk.content.chars().take(100).collect::<String>()
-            }])
-        })
+    let evidence_ref = best_evidence_quote(chunks, transcript, 0);
+    let evidence_text = evidence_ref
+        .as_ref()
+        .map(|item| item.quote.clone())
+        .unwrap_or_else(|| "当前材料事实".into());
+    let evidence = evidence_ref
+        .map(|item| json!([item]))
         .unwrap_or_else(|| json!([]));
     json!({
         "score": score,
-        "summary": "已根据现场陈述和项目材料完成基础内容评议，建议继续补充可验证的方案与结果。",
+        "summary": format!("现场陈述没有被模型完整解析，已按材料事实“{evidence_text}”保守评议，不能把未核验内容计为已完成。"),
+        "covered_points": [],
+        "missing_points": [
+            format!("没有把陈述与材料事实“{evidence_text}”逐项对应。"),
+            "没有提供足够的实现结果、验证条件或局限。"
+        ],
+        "unsupported_claims": ["现场陈述中的部分说法无法在材料中定位。"],
         "evidence": evidence,
         "suggestions": [
-            "按背景、方案、创新、验证、局限组织陈述，减少只描述功能。",
-            "每个关键结论补充一项可核验的数据、实验结果或材料依据。",
-            "回答评委问题时先给结论，再说明依据和适用边界。"
+            format!("围绕材料事实“{evidence_text}”补充对应的实现步骤，不要只重复愿景。"),
+            format!("为“{evidence_text}”补充一个测试条件、结果数据或真实使用场景。"),
+            "明确一个当前尚未验证的限制，并说明下一步如何验证。"
         ],
         "confidence": 0.35,
         "evaluation_source": "material_recovery"
@@ -817,13 +908,13 @@ fn calibrate_content_score(
         .max()
         .unwrap_or_default();
     let upper_bound = if character_count < 120 {
-        35
+        25
     } else if overlap == 0 {
-        45
+        35
     } else if overlap < 3 {
-        65
+        55
     } else if overlap < 6 {
-        80
+        72
     } else {
         100
     };
@@ -1063,7 +1154,7 @@ mod tests {
 
         assert_eq!(
             calibrate_content_score(95, "这是完全无关的泛泛描述，没有项目依据。", &chunks),
-            35
+            25
         );
         assert_eq!(
             calibrate_content_score(95, &"系统采用端云协同架构并完成验证。".repeat(20), &chunks,),
