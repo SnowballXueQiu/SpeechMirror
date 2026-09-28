@@ -61,7 +61,6 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   bool _speaking = false;
   bool _timerRunning = false;
   bool _deadlineSignaled = false;
-  bool _pendingFinish = false;
 
   JuryQuestion? get _currentQuestion =>
       _questions.isEmpty ? null : _questions.last;
@@ -501,10 +500,6 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       await _submitAnswer();
       return;
     }
-    if (_pendingFinish) {
-      await _finish(announce: false);
-      return;
-    }
     if (_pendingAnswer != null) {
       setState(() => _submitting = true);
       await _advanceAfterAnswer(_pendingAnswer!);
@@ -529,27 +524,12 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     setState(() {
       _recording = false;
       _finishing = true;
-      _pendingFinish = true;
       _error = null;
     });
-    try {
-      if (announce) {
-        setState(() => _speaking = true);
-        await _tts.speak('本次答辩结束。');
-        if (mounted) setState(() => _speaking = false);
-      }
-      await _withAutomaticRetry(
-        () => ref.read(apiClientProvider).analyzeSession(_sessionId!),
-      );
-      if (mounted) context.go('/reports/${_sessionId!}');
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _error = error.toString();
-        _finishing = false;
-        _speaking = false;
-      });
+    if (announce) {
+      HapticFeedback.mediumImpact();
     }
+    if (mounted) context.go('/reports/${_sessionId!}?generate=1');
   }
 
   Future<void> _confirmManualEnd() async {
@@ -613,26 +593,17 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
           fit: StackFit.expand,
           children: [
             _CameraSurface(controller: _camera),
+            const IgnorePointer(child: _JuryScrim()),
             SafeArea(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
                 child: Column(
                   children: [
                     Row(
                       children: [
-                        IconButton.filled(
-                          tooltip: '结束答辩',
-                          style: IconButton.styleFrom(
-                            backgroundColor: Colors.black54,
-                            foregroundColor: Colors.white,
-                          ),
-                          onPressed: busy ? null : _confirmManualEnd,
-                          icon: const Icon(Icons.close),
-                        ),
+                        _CallBadge(active: _speaking || _recording),
                         const Spacer(),
                         _ElapsedClock(seconds: _elapsedSeconds),
-                        const Spacer(),
-                        const SizedBox(width: 48),
                       ],
                     ),
                     const Spacer(),
@@ -648,9 +619,9 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                           ? null
                           : _speakCurrent,
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 22),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         _RoundControl(
                           tooltip: '输入文字回答',
@@ -659,13 +630,15 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                               ? null
                               : _showAnswerSheet,
                         ),
+                        const SizedBox(width: 22),
                         _RoundControl(
                           tooltip: _recording ? '结束回答' : '开始回答',
-                          icon: _recording ? Icons.stop : Icons.mic,
+                          icon: _recording ? Icons.stop_rounded : Icons.mic,
                           emphasized: true,
                           active: _recording,
                           onPressed: busy && !_recording ? null : _toggleVoice,
                         ),
+                        const SizedBox(width: 22),
                         _RoundControl(
                           tooltip: '结束答辩',
                           icon: Icons.call_end,
@@ -685,6 +658,57 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   }
 }
 
+class _JuryScrim extends StatelessWidget {
+  const _JuryScrim();
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color(0x66000000),
+          Colors.transparent,
+          Colors.transparent,
+          Color(0xE8000000),
+        ],
+        stops: [0, 0.17, 0.45, 1],
+      ),
+    ),
+  );
+}
+
+class _CallBadge extends StatelessWidget {
+  const _CallBadge({required this.active});
+
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 7,
+        height: 7,
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFF4ADE80) : const Color(0xFF9AB8FF),
+          shape: BoxShape.circle,
+        ),
+      ),
+      const SizedBox(width: 7),
+      const Text(
+        'AI 答辩',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ],
+  );
+}
+
 class _CameraSurface extends StatelessWidget {
   const _CameraSurface({required this.controller});
 
@@ -695,7 +719,7 @@ class _CameraSurface extends StatelessWidget {
     final camera = controller;
     if (camera == null || !camera.value.isInitialized) {
       return const ColoredBox(
-        color: Color(0xFF151B19),
+        color: Color(0xFF101216),
         child: Center(
           child: Icon(Icons.person_outline, color: Colors.white24, size: 96),
         ),
@@ -719,21 +743,13 @@ class _ElapsedClock extends StatelessWidget {
   final int seconds;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-    decoration: BoxDecoration(
-      color: Colors.black54,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: Colors.white24),
-    ),
-    child: Text(
-      '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-        fontFeatures: [FontFeature.tabularFigures()],
-      ),
+  Widget build(BuildContext context) => Text(
+    '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
+    style: const TextStyle(
+      color: Colors.white,
+      fontSize: 15,
+      fontWeight: FontWeight.w700,
+      fontFeatures: [FontFeature.tabularFigures()],
     ),
   );
 }
@@ -754,15 +770,8 @@ class _QuestionOverlay extends StatelessWidget {
   final VoidCallback? onReplay;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    constraints: const BoxConstraints(maxHeight: 220),
-    padding: const EdgeInsets.fromLTRB(18, 14, 12, 16),
-    decoration: BoxDecoration(
-      color: const Color(0xD91A211E),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: Colors.white24),
-    ),
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(maxHeight: 230),
     child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -771,25 +780,25 @@ class _QuestionOverlay extends StatelessWidget {
           children: [
             if (loading)
               const SizedBox.square(
-                dimension: 14,
+                dimension: 13,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Color(0xFF8AD8C1),
+                  color: AppColors.signal,
                 ),
               )
             else
               Icon(
-                speaking ? Icons.graphic_eq : Icons.record_voice_over_outlined,
-                size: 17,
-                color: const Color(0xFF8AD8C1),
+                speaking ? Icons.graphic_eq_rounded : Icons.circle,
+                size: speaking ? 18 : 7,
+                color: AppColors.signal,
               ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 status,
                 style: const TextStyle(
-                  color: Color(0xFFB6C5BF),
-                  fontSize: 13,
+                  color: Colors.white70,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -797,7 +806,7 @@ class _QuestionOverlay extends StatelessWidget {
             IconButton(
               tooltip: '重新播放问题',
               onPressed: onReplay,
-              icon: const Icon(Icons.volume_up_outlined),
+              icon: const Icon(Icons.volume_up_outlined, size: 21),
               color: Colors.white,
             ),
           ],
@@ -810,9 +819,10 @@ class _QuestionOverlay extends StatelessWidget {
                 question!,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 20,
-                  height: 1.45,
+                  fontSize: 21,
+                  height: 1.4,
                   fontWeight: FontWeight.w700,
+                  shadows: [Shadow(color: Colors.black87, blurRadius: 9)],
                 ),
               ),
             ),
@@ -879,20 +889,22 @@ class _RoundControl extends StatelessWidget {
     final background = destructive
         ? const Color(0xFFD84B3E)
         : emphasized
-        ? (active ? const Color(0xFFF1F3EF) : AppColors.jade)
-        : Colors.black54;
+        ? (active ? Colors.white : AppColors.signal)
+        : const Color(0xA61B1F1C);
     final foreground = active ? AppColors.ink : Colors.white;
     return Tooltip(
       message: tooltip,
       child: IconButton(
         onPressed: onPressed,
         style: IconButton.styleFrom(
-          fixedSize: Size.square(emphasized ? 68 : 54),
+          fixedSize: Size.square(emphasized ? 70 : 54),
           backgroundColor: background,
           foregroundColor: foreground,
           disabledBackgroundColor: Colors.black26,
           disabledForegroundColor: Colors.white30,
-          side: const BorderSide(color: Colors.white24),
+          side: BorderSide(
+            color: emphasized ? Colors.transparent : Colors.white24,
+          ),
         ),
         iconSize: emphasized ? 31 : 25,
         icon: Icon(icon),

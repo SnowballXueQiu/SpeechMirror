@@ -21,7 +21,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('0 个项目'), findsOneWidget);
-    expect(find.text('从一份真实材料开始'), findsOneWidget);
+    expect(find.text('从第一个项目开始'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

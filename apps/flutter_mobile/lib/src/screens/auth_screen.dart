@@ -46,22 +46,53 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'SPEECHMIRROR / 01',
-                      style: TextStyle(
-                        color: AppColors.vermilion,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                      ),
+                    Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: AppColors.softBlue,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.graphic_eq_rounded,
+                            color: AppColors.jade,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '言镜',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              'SpeechMirror',
+                              style: TextStyle(
+                                color: AppColors.muted,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 22),
-                    Text('言镜', style: Theme.of(context).textTheme.displayLarge),
-                    const SizedBox(height: 10),
-                    const Text(
-                      '把每一次答辩，变成可复盘的证据。',
-                      style: TextStyle(fontSize: 18, color: AppColors.muted),
+                    const SizedBox(height: 42),
+                    Text(
+                      _register ? '创建账号' : '欢迎回来',
+                      style: Theme.of(context).textTheme.headlineLarge,
                     ),
-                    const SizedBox(height: 44),
+                    const SizedBox(height: 8),
+                    Text(
+                      _register ? '创建你的个人答辩训练空间' : '登录后继续你的答辩训练',
+                      style: const TextStyle(color: AppColors.muted),
+                    ),
+                    const SizedBox(height: 30),
                     TextFormField(
                       controller: _username,
                       autocorrect: false,

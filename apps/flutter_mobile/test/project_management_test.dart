@@ -39,7 +39,9 @@ void main() {
     await tester.tap(find.text('原项目'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('编辑项目'));
+    await tester.tap(find.byTooltip('项目操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('编辑项目'));
     await tester.pumpAndSettle();
     expect(find.text('编辑答辩项目'), findsOneWidget);
 
@@ -60,7 +62,9 @@ void main() {
 
     await tester.tap(find.text('更新后项目'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('删除项目'));
+    await tester.tap(find.byTooltip('项目操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除项目'));
     await tester.pumpAndSettle();
     expect(find.text('彻底删除项目？'), findsOneWidget);
     expect(find.textContaining('无法撤销'), findsOneWidget);
@@ -69,7 +73,7 @@ void main() {
 
     expect(api.deletedProjectId, 'p1');
     expect(find.text('0 个项目'), findsOneWidget);
-    expect(find.text('从一份真实材料开始'), findsOneWidget);
+    expect(find.text('从第一个项目开始'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

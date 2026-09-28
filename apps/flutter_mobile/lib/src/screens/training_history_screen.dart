@@ -77,14 +77,28 @@ class _TrainingHistoryScreenState extends ConsumerState<TrainingHistoryScreen> {
         }
         final (project, sessions, trends) = snapshot.data!;
         return ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 48),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 48),
           children: [
-            PageIntro(
-              eyebrow: 'PROGRESS / ${trends.points.length} REPORTS',
-              title: project.name,
-              description: '按真实训练报告观察变化，未生成报告的练习只保留在历史记录中。',
+            Text(
+              '${trends.points.length} 份可比较报告',
+              style: const TextStyle(
+                color: AppColors.muted,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 5),
+            Text(
+              project.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 25,
+                height: 1.24,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 22),
             _SummaryBand(sessions: sessions, points: trends.points),
             const SizedBox(height: 28),
             const SectionLabel('训练趋势'),
@@ -93,6 +107,21 @@ class _TrainingHistoryScreenState extends ConsumerState<TrainingHistoryScreen> {
               width: double.infinity,
               child: SegmentedButton<_TrendMetric>(
                 showSelectedIcon: false,
+                style: ButtonStyle(
+                  backgroundColor: WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? AppColors.ink
+                        : Colors.transparent,
+                  ),
+                  foregroundColor: WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? Colors.white
+                        : AppColors.ink,
+                  ),
+                  side: const WidgetStatePropertyAll(
+                    BorderSide(color: AppColors.line),
+                  ),
+                ),
                 segments: const [
                   ButtonSegment(
                     value: _TrendMetric.duration,
@@ -149,8 +178,8 @@ class _SummaryBand extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
       decoration: BoxDecoration(
-        color: AppColors.ink,
-        borderRadius: BorderRadius.circular(7),
+        color: AppColors.night,
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
@@ -184,7 +213,7 @@ class _BandDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      Container(width: 1, height: 44, color: Colors.white24);
+      Container(width: 1, height: 44, color: Colors.white12);
 }
 
 class _SummaryMetric extends StatelessWidget {
@@ -201,7 +230,7 @@ class _SummaryMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
+      Text(label, style: const TextStyle(color: Colors.white38, fontSize: 11)),
       const SizedBox(height: 4),
       Text.rich(
         TextSpan(
@@ -215,7 +244,7 @@ class _SummaryMetric extends StatelessWidget {
             TextSpan(
               text: ' $unit',
               style: const TextStyle(
-                color: Colors.white70,
+                color: Colors.white38,
                 fontSize: 10,
                 fontWeight: FontWeight.w400,
               ),

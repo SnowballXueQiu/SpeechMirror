@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:speechmirror/src/api_client.dart';
 import 'package:speechmirror/src/auth_controller.dart';
 import 'package:speechmirror/src/models.dart';
@@ -107,6 +108,52 @@ void main() {
     expect(api.generationAttempts, 6);
     expect(find.text('AI服务暂时未完成请求，请稍后重试'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('ending a defense leaves the call before report generation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _JuryApiClient();
+    final router = GoRouter(
+      initialLocation: '/projects/project-1/jury',
+      routes: [
+        GoRoute(
+          path: '/projects/:id/jury',
+          builder: (context, state) =>
+              const JuryScreen(projectId: 'project-1', sessionId: 'session-1'),
+        ),
+        GoRoute(
+          path: '/reports/:sessionId',
+          builder: (context, state) =>
+              Scaffold(body: Text('生成报告 ${state.pathParameters['sessionId']}')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await _pumpAsync(tester);
+    await tester.tap(find.byTooltip('结束答辩'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '结束答辩'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('生成报告 session-1'), findsOneWidget);
+    expect(find.byType(JuryScreen), findsNothing);
+    expect(
+      router.routeInformationProvider.value.uri.queryParameters['generate'],
+      '1',
+    );
     expect(tester.takeException(), isNull);
   });
 }

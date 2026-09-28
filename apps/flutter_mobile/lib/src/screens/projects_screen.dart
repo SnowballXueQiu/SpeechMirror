@@ -8,14 +8,18 @@ import '../project_editor.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
+enum _AccountAction { logout }
+
 class ProjectsScreen extends ConsumerStatefulWidget {
   const ProjectsScreen({super.key});
+
   @override
   ConsumerState<ProjectsScreen> createState() => _ProjectsScreenState();
 }
 
 class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
   late Future<List<Project>> _projects;
+
   @override
   void initState() {
     super.initState();
@@ -32,22 +36,40 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('言镜'),
+      toolbarHeight: 72,
+      titleSpacing: 20,
+      title: const _Wordmark(),
       actions: [
-        IconButton(
-          tooltip: '退出登录',
-          onPressed: () => ref.read(authControllerProvider).logout(),
-          icon: const Icon(Icons.logout),
+        IconButton.filled(
+          tooltip: '新建项目',
+          style: IconButton.styleFrom(
+            fixedSize: const Size.square(40),
+            backgroundColor: AppColors.ink,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: _createProject,
+          icon: const Icon(Icons.add_rounded),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
+        PopupMenuButton<_AccountAction>(
+          tooltip: '账户菜单',
+          icon: const Icon(Icons.more_horiz_rounded),
+          onSelected: (_) => ref.read(authControllerProvider).logout(),
+          itemBuilder: (context) => const [
+            PopupMenuItem(
+              value: _AccountAction.logout,
+              child: Row(
+                children: [
+                  Icon(Icons.logout_rounded, size: 20),
+                  SizedBox(width: 12),
+                  Text('退出登录'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 12),
       ],
-    ),
-    floatingActionButton: FloatingActionButton.extended(
-      onPressed: _createProject,
-      backgroundColor: AppColors.vermilion,
-      foregroundColor: Colors.white,
-      icon: const Icon(Icons.add),
-      label: const Text('新建项目'),
     ),
     body: RefreshIndicator(
       onRefresh: () async => _reload(),
@@ -59,90 +81,56 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
           }
           if (snapshot.hasError) {
             return ListView(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(snapshot.error.toString()),
-                ),
-              ],
+              padding: const EdgeInsets.all(24),
+              children: [Text(snapshot.error.toString())],
             );
           }
           final projects = snapshot.data ?? const [];
           return ListView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 48),
             children: [
-              const PageIntro(
-                eyebrow: 'YOUR REHEARSAL DESK',
-                title: '我的答辩项目',
-                description: '材料、训练、追问和改进记录集中在同一个项目中。',
-              ),
-              const SizedBox(height: 30),
-              SectionLabel('${projects.length} 个项目'),
-              const SizedBox(height: 14),
-              if (projects.isEmpty) _EmptyProjects(onCreate: _createProject),
-              for (final project in projects) ...[
-                Card(
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () => _openProject(project.id),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 46,
-                            height: 56,
-                            alignment: Alignment.center,
-                            decoration: const BoxDecoration(
-                              color: AppColors.ink,
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(4),
-                              ),
-                            ),
-                            child: Text(
-                              '${project.durationSeconds ~/ 60}\nMIN',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: AppColors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  project.name,
-                                  style: Theme.of(context).textTheme.titleLarge,
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  project.description?.isNotEmpty == true
-                                      ? project.description!
-                                      : '尚未填写项目简介',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: AppColors.muted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Icon(
-                            Icons.chevron_right,
-                            color: AppColors.muted,
-                          ),
-                        ],
-                      ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    '我的答辩',
+                    style: Theme.of(context).textTheme.headlineLarge,
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${projects.length} 个项目',
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              if (projects.isEmpty) _EmptyProjects(onCreate: _createProject),
+              if (projects.isNotEmpty)
+                DecoratedBox(
+                  decoration: const BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: AppColors.line),
+                      bottom: BorderSide(color: AppColors.line),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      for (var index = 0; index < projects.length; index++) ...[
+                        _ProjectRow(
+                          index: index,
+                          project: projects[index],
+                          onTap: () => _openProject(projects[index].id),
+                        ),
+                        if (index < projects.length - 1)
+                          const Divider(height: 1, indent: 48),
+                      ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-              ],
             ],
           );
         },
@@ -171,27 +159,185 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
   }
 }
 
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 27,
+        height: 27,
+        decoration: const BoxDecoration(
+          color: AppColors.ink,
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.graphic_eq_rounded,
+          color: AppColors.signal,
+          size: 17,
+        ),
+      ),
+      const SizedBox(width: 10),
+      const Text(
+        '言镜',
+        style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+      ),
+    ],
+  );
+}
+
+class _ProjectRow extends StatelessWidget {
+  const _ProjectRow({
+    required this.index,
+    required this.project,
+    required this.onTap,
+  });
+
+  final int index;
+  final Project project;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(
+              '${index + 1}'.padLeft(2, '0'),
+              style: const TextStyle(
+                color: AppColors.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  project.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.schedule_rounded,
+                      size: 14,
+                      color: AppColors.muted,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '${project.durationSeconds ~/ 60} 分钟',
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (project.description?.trim().isNotEmpty == true) ...[
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                          '·',
+                          style: TextStyle(color: AppColors.muted),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          project.description!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 38,
+            height: 38,
+            decoration: const BoxDecoration(
+              color: AppColors.ink,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.arrow_outward_rounded,
+              color: Colors.white,
+              size: 19,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 class _EmptyProjects extends StatelessWidget {
   const _EmptyProjects({required this.onCreate});
+
   final VoidCallback onCreate;
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 56),
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(24, 34, 24, 30),
+    decoration: BoxDecoration(
+      color: AppColors.night,
+      borderRadius: BorderRadius.circular(8),
+    ),
     child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(Icons.mic_none, size: 48, color: AppColors.jade),
-        const SizedBox(height: 16),
-        Text('从一份真实材料开始', style: Theme.of(context).textTheme.titleLarge),
+        Container(
+          width: 42,
+          height: 42,
+          decoration: const BoxDecoration(
+            color: AppColors.signal,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.add_rounded, color: AppColors.ink),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          '从第一个项目开始',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
         const SizedBox(height: 8),
         const Text(
-          '创建项目后上传论文或PPT，言镜将据此训练和追问。',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.muted),
+          '创建项目，加入论文、PPT 或其他答辩材料。',
+          style: TextStyle(color: Colors.white60, height: 1.5),
         ),
-        const SizedBox(height: 20),
-        OutlinedButton.icon(
+        const SizedBox(height: 26),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.signal,
+            foregroundColor: AppColors.ink,
+          ),
           onPressed: onCreate,
-          icon: const Icon(Icons.add),
+          icon: const Icon(Icons.arrow_forward_rounded),
           label: const Text('创建第一个项目'),
         ),
       ],

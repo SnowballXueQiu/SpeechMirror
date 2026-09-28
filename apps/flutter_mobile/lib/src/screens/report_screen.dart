@@ -8,20 +8,55 @@ import '../theme.dart';
 import '../widgets.dart';
 
 class ReportScreen extends ConsumerStatefulWidget {
-  const ReportScreen({super.key, required this.sessionId});
+  const ReportScreen({
+    super.key,
+    required this.sessionId,
+    this.generate = false,
+  });
   final String sessionId;
+  final bool generate;
 
   @override
   ConsumerState<ReportScreen> createState() => _ReportScreenState();
 }
 
 class _ReportScreenState extends ConsumerState<ReportScreen> {
+  static const _maxAutomaticRetries = 5;
+
   late Future<RehearsalReport> _report;
+  int _retryAttempt = 0;
 
   @override
   void initState() {
     super.initState();
-    _report = ref.read(apiClientProvider).getReport(widget.sessionId);
+    _report = _loadReport();
+  }
+
+  Future<RehearsalReport> _loadReport() async {
+    final api = ref.read(apiClientProvider);
+    Object? lastError;
+    for (var attempt = 0; attempt <= _maxAutomaticRetries; attempt += 1) {
+      if (attempt > 0) {
+        if (!mounted) throw StateError('报告页面已关闭');
+        setState(() => _retryAttempt = attempt);
+        await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+      }
+      try {
+        final report = widget.generate
+            ? await api.analyzeSession(widget.sessionId)
+            : await api.getReport(widget.sessionId);
+        if (mounted && _retryAttempt != 0) {
+          setState(() => _retryAttempt = 0);
+        }
+        return report;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (mounted && _retryAttempt != 0) {
+      setState(() => _retryAttempt = 0);
+    }
+    throw lastError ?? StateError('报告生成失败');
   }
 
   @override
@@ -40,26 +75,42 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       future: _report,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return _ReportLoading(
+            generating: widget.generate,
+            retryAttempt: _retryAttempt,
+            maxRetries: _maxAutomaticRetries,
+          );
         }
         if (snapshot.hasError) {
           return _ReportError(error: snapshot.error!, onRetry: _reload);
         }
         final report = snapshot.data!;
         return ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 48),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 48),
           children: [
-            const DefenseStageRail(activeStage: 2),
-            const SizedBox(height: 22),
-            const PageIntro(
-              eyebrow: 'STAGE 03 / REVIEW',
-              title: '综合答辩报告',
-              description: '结合产品陈述、端侧画面指标和AI评委问答定位本次最值得改进的问题。',
+            const Text(
+              '本次答辩',
+              style: TextStyle(
+                color: AppColors.muted,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            const SizedBox(height: 24),
-            _OverallScore(score: report.overallScore),
+            const SizedBox(height: 4),
+            const Text(
+              '综合报告',
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 20),
+            _ReportHero(report: report),
+            const SizedBox(height: 28),
+            const SectionLabel('重点改进'),
             const SizedBox(height: 12),
-            _SummaryBand(report: report),
+            if (report.suggestions.isEmpty)
+              const Text('暂无额外建议。', style: TextStyle(color: AppColors.muted))
+            else
+              for (var i = 0; i < report.suggestions.length; i++)
+                _Suggestion(index: i + 1, text: report.suggestions[i]),
             if (report.defenseScores.isNotEmpty) ...[
               const SizedBox(height: 28),
               const SectionLabel('答辩评分'),
@@ -101,14 +152,6 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               score: report.qa.score,
               summary: report.qa.summary,
             ),
-            const SizedBox(height: 26),
-            const SectionLabel('重点改进'),
-            const SizedBox(height: 12),
-            if (report.suggestions.isEmpty)
-              const Text('暂无额外建议。', style: TextStyle(color: AppColors.muted))
-            else
-              for (var i = 0; i < report.suggestions.length; i++)
-                _Suggestion(index: i + 1, text: report.suggestions[i]),
             const SizedBox(height: 18),
             _CollapsedReportSection(
               title: '材料依据',
@@ -159,11 +202,66 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
   );
 
   void _reload() {
-    final report = ref.read(apiClientProvider).getReport(widget.sessionId);
+    final report = _loadReport();
     setState(() {
       _report = report;
     });
   }
+}
+
+class _ReportLoading extends StatelessWidget {
+  const _ReportLoading({
+    required this.generating,
+    required this.retryAttempt,
+    required this.maxRetries,
+  });
+
+  final bool generating;
+  final int retryAttempt;
+  final int maxRetries;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: AppColors.softBlue,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.analytics_outlined,
+              color: AppColors.jade,
+              size: 28,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            generating ? '正在生成答辩报告' : '正在读取答辩报告',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            retryAttempt > 0
+                ? '服务暂时未完成请求，正在自动重试（$retryAttempt/$maxRetries）'
+                : '正在整理评分与改进建议',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.muted),
+          ),
+          const SizedBox(height: 22),
+          const SizedBox(
+            width: 120,
+            child: LinearProgressIndicator(minHeight: 3),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _CollapsedReportSection extends StatelessWidget {
@@ -187,14 +285,14 @@ class _CollapsedReportSection extends StatelessWidget {
   );
 }
 
-class _OverallScore extends StatelessWidget {
-  const _OverallScore({required this.score});
+class _ReportHero extends StatelessWidget {
+  const _ReportHero({required this.report});
 
-  final int? score;
+  final RehearsalReport report;
 
   @override
   Widget build(BuildContext context) {
-    final value = score;
+    final value = report.overallScore;
     final grade = value == null
         ? '未评分'
         : value >= 90
@@ -207,47 +305,142 @@ class _OverallScore extends StatelessWidget {
         ? '及格'
         : '不及格';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
       decoration: BoxDecoration(
-        color: AppColors.white,
-        border: Border.all(color: AppColors.line),
-        borderRadius: BorderRadius.circular(7),
+        color: AppColors.night,
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.workspace_premium_outlined,
-            color: AppColors.vermilion,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '答辩最终评分',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '答辩最终评分',
+                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      grade,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(grade, style: const TextStyle(color: AppColors.muted)),
-              ],
-            ),
+              ),
+              Text(
+                value?.toString() ?? '—',
+                style: const TextStyle(
+                  color: AppColors.signal,
+                  fontSize: 52,
+                  height: 0.95,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              if (value != null)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 4, left: 4),
+                  child: Text(
+                    '/ 100',
+                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                ),
+            ],
           ),
-          Text(
-            score == null ? '—' : '$score',
-            style: const TextStyle(
-              fontFamily: 'Songti SC',
-              fontSize: 34,
-              fontWeight: FontWeight.w800,
-              color: AppColors.vermilion,
-            ),
+          const SizedBox(height: 22),
+          const Divider(color: Colors.white12, height: 1),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _HeroMetric(
+                  label: '语速',
+                  value: '${report.charactersPerMinute.round()}',
+                  unit: '字/分',
+                ),
+              ),
+              Expanded(
+                child: _HeroMetric(
+                  label: '时长',
+                  value: _formatDuration(report.actualSeconds),
+                  unit: '',
+                ),
+              ),
+              Expanded(
+                child: _HeroMetric(
+                  label: '口头禅',
+                  value:
+                      '${report.fillerCounts.values.fold<int>(0, (sum, count) => sum + count)}',
+                  unit: '次',
+                ),
+              ),
+              Expanded(
+                child: _HeroMetric(
+                  label: '长停顿',
+                  value: report.longPauseCount?.toString() ?? '—',
+                  unit: report.longPauseCount == null ? '' : '次',
+                ),
+              ),
+            ],
           ),
-          if (score != null)
-            const Text(' / 100', style: TextStyle(color: AppColors.muted)),
         ],
       ),
     );
   }
+
+  String _formatDuration(int seconds) =>
+      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+}
+
+class _HeroMetric extends StatelessWidget {
+  const _HeroMetric({
+    required this.label,
+    required this.value,
+    required this.unit,
+  });
+
+  final String label;
+  final String value;
+  final String unit;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+      const SizedBox(height: 5),
+      Text.rich(
+        TextSpan(
+          text: value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+          children: [
+            if (unit.isNotEmpty)
+              TextSpan(
+                text: ' $unit',
+                style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class _DefenseScoreRow extends StatelessWidget {
@@ -315,90 +508,6 @@ class _EvidenceGroupLabel extends StatelessWidget {
         fontWeight: FontWeight.w700,
       ),
     ),
-  );
-}
-
-class _SummaryBand extends StatelessWidget {
-  const _SummaryBand({required this.report});
-  final RehearsalReport report;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: AppColors.ink,
-      borderRadius: BorderRadius.circular(7),
-    ),
-    child: Row(
-      children: [
-        Expanded(
-          child: _Metric(
-            label: '语速',
-            value: '${report.charactersPerMinute.round()}',
-            unit: '字/分',
-          ),
-        ),
-        Container(width: 1, height: 44, color: Colors.white24),
-        Expanded(
-          child: _Metric(
-            label: '时长',
-            value: '${report.actualSeconds}',
-            unit: '秒',
-          ),
-        ),
-        Container(width: 1, height: 44, color: Colors.white24),
-        Expanded(
-          child: _Metric(
-            label: '口头禅',
-            value:
-                '${report.fillerCounts.values.fold<int>(0, (sum, value) => sum + value)}',
-            unit: '次',
-          ),
-        ),
-        Container(width: 1, height: 44, color: Colors.white24),
-        Expanded(
-          child: _Metric(
-            label: '长停顿',
-            value: report.longPauseCount?.toString() ?? '--',
-            unit: report.longPauseCount == null ? '未计算' : '次',
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _Metric extends StatelessWidget {
-  const _Metric({required this.label, required this.value, required this.unit});
-  final String label;
-  final String value;
-  final String unit;
-  @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
-      const SizedBox(height: 4),
-      Text.rich(
-        TextSpan(
-          text: value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 23,
-            fontWeight: FontWeight.w800,
-          ),
-          children: [
-            TextSpan(
-              text: ' $unit',
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w400,
-                color: Colors.white70,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ],
   );
 }
 
@@ -507,17 +616,17 @@ class _Suggestion extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 26,
-          height: 26,
+          width: 28,
+          height: 28,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: AppColors.vermilion,
-            borderRadius: BorderRadius.circular(4),
+            color: AppColors.softBlue,
+            borderRadius: BorderRadius.circular(7),
           ),
           child: Text(
             '$index',
             style: const TextStyle(
-              color: Colors.white,
+              color: AppColors.jade,
               fontWeight: FontWeight.w800,
             ),
           ),

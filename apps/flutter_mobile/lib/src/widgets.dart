@@ -15,51 +15,59 @@ class DefenseStageRail extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      for (var index = 0; index < _labels.length; index++) ...[
-        Expanded(
-          child: Column(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: index <= activeStage
-                      ? AppColors.jade
-                      : AppColors.paperStrong,
-                ),
-                child: Icon(
-                  _icons[index],
-                  size: 18,
-                  color: index <= activeStage ? Colors.white : AppColors.muted,
-                ),
+  Widget build(BuildContext context) => Container(
+    height: 46,
+    padding: const EdgeInsets.all(4),
+    decoration: BoxDecoration(
+      color: AppColors.white,
+      border: Border.all(color: AppColors.line),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      children: [
+        for (var index = 0; index < _labels.length; index++)
+          Expanded(
+            child: Container(
+              height: 36,
+              decoration: BoxDecoration(
+                color: index == activeStage
+                    ? AppColors.softBlue
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
               ),
-              const SizedBox(height: 6),
-              Text(
-                _labels[index],
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: index == activeStage
-                      ? FontWeight.w800
-                      : FontWeight.w500,
-                  color: index == activeStage ? AppColors.ink : AppColors.muted,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _icons[index],
+                    size: 16,
+                    color: index <= activeStage
+                        ? AppColors.jade
+                        : AppColors.muted,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _labels[index],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: index == activeStage
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        color: index == activeStage
+                            ? AppColors.jadeDark
+                            : AppColors.muted,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-        if (index < _labels.length - 1)
-          Container(
-            width: 28,
-            height: 2,
-            margin: const EdgeInsets.only(bottom: 24),
-            color: index < activeStage ? AppColors.jade : AppColors.line,
+            ),
           ),
       ],
-    ],
+    ),
   );
 }
 
@@ -81,12 +89,12 @@ class PageIntro extends StatelessWidget {
       Text(
         eyebrow.toUpperCase(),
         style: const TextStyle(
-          color: AppColors.vermilion,
-          fontWeight: FontWeight.w800,
-          fontSize: 12,
+          color: AppColors.jade,
+          fontWeight: FontWeight.w700,
+          fontSize: 11,
         ),
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: 6),
       Text(title, style: Theme.of(context).textTheme.headlineLarge),
       if (description.trim().isNotEmpty) ...[
         const SizedBox(height: 8),
@@ -108,8 +116,6 @@ class SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Container(width: 4, height: 18, color: AppColors.vermilion),
-      const SizedBox(width: 9),
       Expanded(
         child: Text(text, style: Theme.of(context).textTheme.titleLarge),
       ),
@@ -181,10 +187,7 @@ class ScoreRow extends StatelessWidget {
 }
 
 void showError(BuildContext context, Object error) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(error.toString()),
-      backgroundColor: AppColors.vermilion,
-    ),
-  );
+  ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(error.toString())));
 }

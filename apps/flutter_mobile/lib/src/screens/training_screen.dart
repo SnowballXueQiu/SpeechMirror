@@ -372,7 +372,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         backgroundColor: Colors.black,
         body: _initializing
             ? const ColoredBox(
-                color: Color(0xFF151B19),
+                color: Color(0xFF101216),
                 child: Center(
                   child: CircularProgressIndicator(color: Colors.white),
                 ),
@@ -392,28 +392,31 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                 fit: StackFit.expand,
                 children: [
                   _TrainingCameraSurface(controller: _camera),
+                  const IgnorePointer(child: _VideoScrim()),
                   SafeArea(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
                       child: Column(
                         children: [
                           Row(
                             children: [
-                              IconButton.filled(
+                              IconButton(
                                 tooltip: '退出训练',
                                 style: IconButton.styleFrom(
-                                  backgroundColor: Colors.black54,
+                                  fixedSize: const Size.square(42),
+                                  backgroundColor: const Color(0x66000000),
                                   foregroundColor: Colors.white,
+                                  disabledBackgroundColor: Colors.black26,
                                 ),
                                 onPressed: _recording || _processing
                                     ? null
                                     : () => context.pop(),
                                 icon: const Icon(Icons.close),
                               ),
+                              const SizedBox(width: 10),
+                              const _StageBadge(),
                               const Spacer(),
                               _PresentationClock(seconds: _elapsedSeconds),
-                              const Spacer(),
-                              const SizedBox(width: 48),
                             ],
                           ),
                           const Spacer(),
@@ -432,62 +435,37 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                                 : _processing
                                 ? '正在准备'
                                 : _recording
-                                ? '项目介绍'
+                                ? '项目陈述进行中'
                                 : '模拟答辩',
                             message: _greeting
                                 ? _openingLine
                                 : _processing
                                 ? _processingLabel
                                 : _recording
-                                ? '请完整介绍你的项目，介绍结束后进入答辩。'
-                                : '准备好后开始介绍项目。',
+                                ? '面向镜头完成项目介绍'
+                                : '准备好后开始',
                             busy: _greeting || _processing,
                           ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size.fromHeight(56),
-                                backgroundColor: _recording
-                                    ? const Color(0xFFF1F3EF)
-                                    : AppColors.jade,
-                                foregroundColor: _recording
-                                    ? AppColors.ink
-                                    : Colors.white,
-                              ),
-                              onPressed: _greeting || _processing
-                                  ? null
-                                  : _pendingTraining != null
-                                  ? _submitForAnalysis
-                                  : _recording
-                                  ? _stop
-                                  : _start,
-                              icon: _greeting || _processing
-                                  ? const SizedBox.square(
-                                      dimension: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : Icon(
-                                      _recording
-                                          ? Icons.arrow_forward
-                                          : Icons.fiber_manual_record,
-                                    ),
-                              label: Text(
-                                _greeting
-                                    ? '评委正在说明流程'
-                                    : _processing
-                                    ? _processingLabel
-                                    : _pendingTraining != null
-                                    ? '继续进入答辩'
-                                    : _recording
-                                    ? '介绍完毕，开始答辩'
-                                    : '开始项目介绍',
-                              ),
-                            ),
+                          const SizedBox(height: 22),
+                          _PrimaryCallAction(
+                            busy: _greeting || _processing,
+                            active: _recording,
+                            onPressed: _greeting || _processing
+                                ? null
+                                : _pendingTraining != null
+                                ? _submitForAnalysis
+                                : _recording
+                                ? _stop
+                                : _start,
+                            label: _greeting
+                                ? '评委正在说明'
+                                : _processing
+                                ? _processingLabel
+                                : _pendingTraining != null
+                                ? '继续进入答辩'
+                                : _recording
+                                ? '结束介绍'
+                                : '开始介绍',
                           ),
                         ],
                       ),
@@ -510,7 +488,7 @@ class _TrainingCameraSurface extends StatelessWidget {
     final camera = controller;
     if (camera == null || !camera.value.isInitialized) {
       return const ColoredBox(
-        color: Color(0xFF151B19),
+        color: Color(0xFF101216),
         child: Center(
           child: Icon(Icons.person_outline, color: Colors.white24, size: 96),
         ),
@@ -528,27 +506,67 @@ class _TrainingCameraSurface extends StatelessWidget {
   }
 }
 
+class _VideoScrim extends StatelessWidget {
+  const _VideoScrim();
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color(0x66000000),
+          Colors.transparent,
+          Colors.transparent,
+          Color(0xD9000000),
+        ],
+        stops: [0, 0.18, 0.54, 1],
+      ),
+    ),
+  );
+}
+
+class _StageBadge extends StatelessWidget {
+  const _StageBadge();
+
+  @override
+  Widget build(BuildContext context) => const Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      DecoratedBox(
+        decoration: BoxDecoration(
+          color: Color(0xFFFF5B4D),
+          shape: BoxShape.circle,
+        ),
+        child: SizedBox.square(dimension: 7),
+      ),
+      SizedBox(width: 7),
+      Text(
+        '项目陈述',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ],
+  );
+}
+
 class _PresentationClock extends StatelessWidget {
   const _PresentationClock({required this.seconds});
 
   final int seconds;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-    decoration: BoxDecoration(
-      color: Colors.black54,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: Colors.white24),
-    ),
-    child: Text(
-      '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-        fontFeatures: [FontFeature.tabularFigures()],
-      ),
+  Widget build(BuildContext context) => Text(
+    '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
+    style: const TextStyle(
+      color: Colors.white,
+      fontSize: 15,
+      fontWeight: FontWeight.w700,
+      fontFeatures: [FontFeature.tabularFigures()],
     ),
   );
 }
@@ -565,56 +583,107 @@ class _TrainingStatusPanel extends StatelessWidget {
   final bool busy;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: const Color(0xD91A211E),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: Colors.white24),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            if (busy)
-              const SizedBox.square(
-                dimension: 14,
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (busy)
+            const SizedBox.square(
+              dimension: 13,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.signal,
+              ),
+            )
+          else
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppColors.signal,
+                shape: BoxShape.circle,
+              ),
+              child: SizedBox.square(dimension: 7),
+            ),
+          const SizedBox(width: 7),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 9),
+      Text(
+        message,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          height: 1.42,
+          fontWeight: FontWeight.w700,
+          shadows: [Shadow(color: Colors.black87, blurRadius: 8)],
+        ),
+      ),
+    ],
+  );
+}
+
+class _PrimaryCallAction extends StatelessWidget {
+  const _PrimaryCallAction({
+    required this.busy,
+    required this.active,
+    required this.onPressed,
+    required this.label,
+  });
+
+  final bool busy;
+  final bool active;
+  final VoidCallback? onPressed;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      IconButton.filled(
+        tooltip: label,
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          fixedSize: const Size.square(70),
+          backgroundColor: active ? Colors.white : AppColors.signal,
+          foregroundColor: AppColors.ink,
+          disabledBackgroundColor: Colors.white24,
+          disabledForegroundColor: Colors.white60,
+        ),
+        iconSize: 29,
+        icon: busy
+            ? const SizedBox.square(
+                dimension: 21,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF8AD8C1),
+                  strokeWidth: 2.5,
+                  color: Colors.white,
                 ),
               )
-            else
-              const Icon(
-                Icons.videocam_outlined,
-                size: 17,
-                color: Color(0xFF8AD8C1),
-              ),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                color: Color(0xFFB6C5BF),
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
+            : Icon(active ? Icons.arrow_forward_rounded : Icons.mic_rounded),
+      ),
+      const SizedBox(height: 9),
+      Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
         ),
-        const SizedBox(height: 10),
-        Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            height: 1.45,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    ),
+      ),
+    ],
   );
 }
 
@@ -659,7 +728,7 @@ class _DarkSetupError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: const Color(0xFF151B19),
+    color: const Color(0xFF101216),
     child: Center(
       child: Padding(
         padding: const EdgeInsets.all(28),

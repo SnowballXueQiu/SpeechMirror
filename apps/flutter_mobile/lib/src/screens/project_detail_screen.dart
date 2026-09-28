@@ -12,6 +12,8 @@ import '../project_editor.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
+enum _ProjectAction { edit, delete }
+
 class ProjectDetailScreen extends ConsumerStatefulWidget {
   const ProjectDetailScreen({super.key, required this.projectId});
   final String projectId;
@@ -63,23 +65,52 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('项目训练台'),
+      toolbarHeight: 64,
+      title: const Text('答辩项目'),
       actions: [
         IconButton(
           tooltip: '训练历史',
           onPressed: () =>
               context.push('/projects/${widget.projectId}/history'),
-          icon: const Icon(Icons.insights_outlined),
+          icon: const Icon(Icons.history_rounded),
         ),
-        IconButton(
-          tooltip: '编辑项目',
-          onPressed: _mutating ? null : _editProject,
-          icon: const Icon(Icons.edit_outlined),
-        ),
-        IconButton(
-          tooltip: '删除项目',
-          onPressed: _mutating ? null : _deleteProject,
-          icon: const Icon(Icons.delete_outline),
+        PopupMenuButton<_ProjectAction>(
+          tooltip: '项目操作',
+          enabled: !_mutating,
+          onSelected: (action) {
+            switch (action) {
+              case _ProjectAction.edit:
+                _editProject();
+              case _ProjectAction.delete:
+                _deleteProject();
+            }
+          },
+          itemBuilder: (context) => const [
+            PopupMenuItem(
+              value: _ProjectAction.edit,
+              child: Row(
+                children: [
+                  Icon(Icons.edit_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('编辑项目'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: _ProjectAction.delete,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.delete_outline_rounded,
+                    size: 20,
+                    color: AppColors.vermilion,
+                  ),
+                  SizedBox(width: 12),
+                  Text('删除项目'),
+                ],
+              ),
+            ),
+          ],
         ),
         const SizedBox(width: 8),
       ],
@@ -96,150 +127,93 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
         final (project, documents) = snapshot.data!;
         final ready = documents.where((item) => item.status == 'ready').length;
         return ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 48),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 48),
           children: [
-            PageIntro(
-              eyebrow: 'PROJECT / ${project.durationSeconds ~/ 60} MIN',
-              title: project.name,
-              description: project.description ?? '上传材料后即可开始一次基于证据的模拟答辩。',
-            ),
-            const SizedBox(height: 28),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: ready > 0 ? AppColors.jadeDark : AppColors.ink,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    ready > 0
-                        ? Icons.check_circle_outline
-                        : Icons.hourglass_empty,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      ready > 0 ? '$ready 份材料已进入项目知识库' : '至少上传一份材料后开始训练',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
+            Text(
+              project.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 25,
+                height: 1.24,
+                fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(height: 24),
+            if (project.description?.trim().isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Text(
+                project.description!,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.muted, height: 1.5),
+              ),
+            ],
+            const SizedBox(height: 22),
+            _DefenseStage(
+              minutes: project.durationSeconds ~/ 60,
+              readyDocuments: ready,
+              enabled: ready > 0,
+              onStart: () => context.push('/projects/${project.id}/training'),
+            ),
+            const SizedBox(height: 30),
             Row(
               children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: ready > 0
-                        ? () => context.push('/projects/${project.id}/training')
-                        : null,
-                    icon: const Icon(Icons.videocam_outlined),
-                    label: const Text('开始模拟答辩'),
+                const Expanded(
+                  child: Text(
+                    '项目材料',
+                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
                   ),
                 ),
-                const SizedBox(width: 10),
-                IconButton.filledTonal(
-                  tooltip: 'AI评委',
-                  onPressed: ready > 0
-                      ? () => context.push('/projects/${project.id}/jury')
-                      : null,
-                  icon: const Icon(Icons.forum_outlined),
+                IconButton(
+                  tooltip: '刷新状态',
+                  onPressed: _reload,
+                  icon: const Icon(Icons.refresh_rounded, size: 21),
+                ),
+                TextButton.icon(
+                  onPressed: _uploading ? null : _pickFile,
+                  icon: _uploading
+                      ? const SizedBox.square(
+                          dimension: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add_rounded, size: 20),
+                  label: const Text('添加'),
                 ),
               ],
             ),
-            const SizedBox(height: 30),
-            SectionLabel(
-              '答辩材料',
-              trailing: IconButton(
-                tooltip: '刷新状态',
-                onPressed: _reload,
-                icon: const Icon(Icons.refresh),
-              ),
-            ),
-            const SizedBox(height: 12),
-            for (final document in documents) ...[
-              Card(
-                child: ListTile(
-                  onTap: document.status == 'processing'
-                      ? null
-                      : () async {
-                          await context.push(
-                            '/projects/${project.id}/documents/${document.id}',
-                          );
-                          if (mounted) _reload();
-                        },
-                  leading: Icon(
-                    _documentIcon(document.mediaType),
-                    color: AppColors.jade,
-                  ),
-                  title: Text(
-                    document.filename,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    _statusText(document),
-                    style: TextStyle(
-                      color: document.status == 'failed'
-                          ? AppColors.vermilion
-                          : AppColors.muted,
-                    ),
-                  ),
-                  trailing: document.status == 'processing'
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.chevron_right),
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
-            if (documents.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Text(
-                  '尚未添加材料。支持PDF、PPTX、DOCX、文本和图片。',
-                  style: TextStyle(color: AppColors.muted),
-                ),
-              ),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _uploading ? null : _pickFile,
-              icon: _uploading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.upload_file),
-              label: Text(_uploading ? '正在上传' : '添加材料'),
-            ),
-            const SizedBox(height: 28),
-            const SectionLabel('训练方法'),
-            const SizedBox(height: 12),
-            const _MethodRow(
-              number: '01',
-              title: '完整陈述',
-              body: '按照真实时长完成一次连续答辩，训练中仅接收必要提醒。',
-            ),
-            const _MethodRow(
-              number: '02',
-              title: '证据复盘',
-              body: '报告把内容缺口对应到材料片段，不用不可解释的总分替代建议。',
-            ),
-            const _MethodRow(
-              number: '03',
-              title: '评委追问',
-              body: '基于论文内容生成问题，回答后继续追问薄弱环节。',
-            ),
+            if (documents.isEmpty)
+              _EmptyMaterials(onAdd: _uploading ? null : _pickFile),
+            if (documents.isNotEmpty)
+              DecoratedBox(
+                decoration: const BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: AppColors.line),
+                    bottom: BorderSide(color: AppColors.line),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    for (var index = 0; index < documents.length; index++) ...[
+                      _MaterialRow(
+                        document: documents[index],
+                        icon: _documentIcon(documents[index].mediaType),
+                        status: _statusText(documents[index]),
+                        onTap: documents[index].status == 'processing'
+                            ? null
+                            : () async {
+                                await context.push(
+                                  '/projects/${project.id}/documents/${documents[index].id}',
+                                );
+                                if (mounted) _reload();
+                              },
+                      ),
+                      if (index < documents.length - 1)
+                        const Divider(height: 1, indent: 52),
+                    ],
+                  ],
+                ),
+              ),
           ],
         );
       },
@@ -364,42 +338,245 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
   };
 }
 
-class _MethodRow extends StatelessWidget {
-  const _MethodRow({
-    required this.number,
-    required this.title,
-    required this.body,
+class _DefenseStage extends StatelessWidget {
+  const _DefenseStage({
+    required this.minutes,
+    required this.readyDocuments,
+    required this.enabled,
+    required this.onStart,
   });
-  final String number;
-  final String title;
-  final String body;
+
+  final int minutes;
+  final int readyDocuments;
+  final bool enabled;
+  final VoidCallback onStart;
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 13),
-    child: Row(
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(20, 20, 18, 18),
+    decoration: BoxDecoration(
+      color: AppColors.night,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: 42,
-          child: Text(
-            number,
-            style: const TextStyle(
-              color: AppColors.vermilion,
-              fontWeight: FontWeight.w800,
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: enabled ? AppColors.signal : Colors.white30,
+                shape: BoxShape.circle,
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Text(
+              enabled ? '已就绪' : '等待材料',
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '$minutes MIN  ·  $readyDocuments FILES',
+              style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(body, style: const TextStyle(color: AppColors.muted)),
-            ],
+        const SizedBox(height: 22),
+        const Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Text(
+                '模拟答辩',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            _SignalBars(),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          enabled ? '项目陈述 · AI 追问 · 综合报告' : '添加材料后即可开始',
+          style: const TextStyle(color: Colors.white54, fontSize: 13),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.signal,
+              foregroundColor: AppColors.ink,
+              disabledBackgroundColor: Colors.white12,
+              disabledForegroundColor: Colors.white38,
+              minimumSize: const Size.fromHeight(50),
+            ),
+            onPressed: enabled ? onStart : null,
+            icon: const Icon(Icons.arrow_forward_rounded),
+            label: const Text('进入答辩'),
           ),
         ),
       ],
+    ),
+  );
+}
+
+class _SignalBars extends StatelessWidget {
+  const _SignalBars();
+
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.end,
+    children: [
+      for (final height in const [12.0, 24.0, 17.0, 31.0, 21.0, 13.0])
+        Container(
+          width: 3,
+          height: height,
+          margin: const EdgeInsets.only(left: 4),
+          decoration: BoxDecoration(
+            color: AppColors.signal,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+    ],
+  );
+}
+
+class _MaterialRow extends StatelessWidget {
+  const _MaterialRow({
+    required this.document,
+    required this.icon,
+    required this.status,
+    required this.onTap,
+  });
+
+  final ProjectDocument document;
+  final IconData icon;
+  final String status;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 38,
+            child: Icon(icon, color: AppColors.ink, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  document.filename,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: document.status == 'failed'
+                            ? AppColors.vermilion
+                            : document.status == 'ready'
+                            ? AppColors.success
+                            : AppColors.gold,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        status,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: document.status == 'failed'
+                              ? AppColors.vermilion
+                              : AppColors.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (document.status == 'processing')
+            const SizedBox.square(
+              dimension: 17,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: AppColors.muted,
+              size: 15,
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _EmptyMaterials extends StatelessWidget {
+  const _EmptyMaterials({required this.onAdd});
+
+  final VoidCallback? onAdd;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onAdd,
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 28),
+      decoration: const BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppColors.line),
+          bottom: BorderSide(color: AppColors.line),
+        ),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.upload_file_outlined, color: AppColors.muted),
+          SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('添加项目材料', style: TextStyle(fontWeight: FontWeight.w700)),
+                SizedBox(height: 4),
+                Text(
+                  'PDF、PPTX、DOCX、文本或图片',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.add_rounded),
+        ],
+      ),
     ),
   );
 }

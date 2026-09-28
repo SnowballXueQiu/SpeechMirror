@@ -61,8 +61,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/reports/:sessionId',
-        builder: (context, state) =>
-            ReportScreen(sessionId: state.pathParameters['sessionId']!),
+        builder: (context, state) => ReportScreen(
+          sessionId: state.pathParameters['sessionId']!,
+          generate: state.uri.queryParameters['generate'] == '1',
+        ),
       ),
     ],
   );
@@ -109,9 +111,8 @@ class _BrandLoader extends StatelessWidget {
       Text(
         '言镜',
         style: TextStyle(
-          fontFamily: 'Songti SC',
-          fontSize: 40,
-          fontWeight: FontWeight.w700,
+          fontSize: 34,
+          fontWeight: FontWeight.w800,
           color: AppColors.ink,
         ),
       ),
@@ -120,7 +121,7 @@ class _BrandLoader extends StatelessWidget {
         width: 32,
         height: 2,
         child: LinearProgressIndicator(
-          color: AppColors.vermilion,
+          color: AppColors.jade,
           backgroundColor: AppColors.paperStrong,
         ),
       ),
