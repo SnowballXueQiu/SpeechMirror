@@ -22,7 +22,7 @@ class _ProfilePreferencesScreenState
   final _scenarioOther = TextEditingController();
   final _purposeOther = TextEditingController();
   String? _identity;
-  String? _scenario;
+  final Set<String> _scenarios = {};
   final Set<String> _purposes = {};
   var _consent = false;
   var _saving = false;
@@ -32,7 +32,7 @@ class _ProfilePreferencesScreenState
     super.initState();
     final profile = ref.read(authControllerProvider).profile;
     _identity = profile?.identity;
-    _scenario = profile?.scenario;
+    _scenarios.addAll(profile?.scenarios ?? const []);
     _purposes.addAll(profile?.purposes ?? const []);
     _identityOther.text = profile?.identityOther ?? '';
     _scenarioOther.text = profile?.scenarioOther ?? '';
@@ -100,21 +100,34 @@ class _ProfilePreferencesScreenState
                       ),
                     ),
                   ],
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: _scenario,
-                    decoration: const InputDecoration(labelText: '主要场景'),
-                    items: profileScenarios
-                        .map(
-                          (value) => DropdownMenuItem(
-                            value: value,
-                            child: Text(value),
+                  const SizedBox(height: 28),
+                  const _SectionHeading(title: '主要场景', caption: '可多选。'),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final option in profileScenarios)
+                        FilterChip(
+                          label: Text(option),
+                          selected: _scenarios.contains(option),
+                          onSelected: (selected) => setState(() {
+                            selected
+                                ? _scenarios.add(option)
+                                : _scenarios.remove(option);
+                          }),
+                          showCheckmark: false,
+                          selectedColor: AppColors.ink,
+                          labelStyle: TextStyle(
+                            color: _scenarios.contains(option)
+                                ? Colors.white
+                                : AppColors.ink,
+                            fontWeight: FontWeight.w600,
                           ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setState(() => _scenario = value),
+                        ),
+                    ],
                   ),
-                  if (_scenario == '其他') ...[
+                  if (_scenarios.contains('其他')) ...[
                     const SizedBox(height: 12),
                     TextField(
                       controller: _scenarioOther,
@@ -189,7 +202,7 @@ class _ProfilePreferencesScreenState
       showError(context, '请填写其他身份');
       return;
     }
-    if (_scenario == '其他' && _scenarioOther.text.trim().isEmpty) {
+    if (_scenarios.contains('其他') && _scenarioOther.text.trim().isEmpty) {
       showError(context, '请填写其他场景');
       return;
     }
@@ -208,8 +221,8 @@ class _ProfilePreferencesScreenState
               identityOther: _identity == '其他'
                   ? _identityOther.text.trim()
                   : null,
-              scenario: _scenario,
-              scenarioOther: _scenario == '其他'
+              scenarios: _scenarios.toList(),
+              scenarioOther: _scenarios.contains('其他')
                   ? _scenarioOther.text.trim()
                   : null,
               purposes: _purposes.toList(),

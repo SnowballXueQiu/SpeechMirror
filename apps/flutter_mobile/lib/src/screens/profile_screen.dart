@@ -147,7 +147,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   String _profileSummary(UserProfile profile) {
     final parts = [
       profile.displayIdentity,
-      profile.displayScenario,
+      if (profile.displayScenarios.isNotEmpty)
+        profile.displayScenarios.join('、'),
     ].whereType<String>().where((value) => value.isNotEmpty).toList();
     return parts.isEmpty ? '尚未设置' : parts.join(' · ');
   }
@@ -247,7 +248,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               bio: bio ?? profile.bio,
               identity: profile.identity,
               identityOther: profile.identityOther,
-              scenario: profile.scenario,
+              scenarios: profile.scenarios,
               scenarioOther: profile.scenarioOther,
               purposes: profile.purposes,
               purposeOther: profile.purposeOther,

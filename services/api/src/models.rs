@@ -58,6 +58,7 @@ pub struct UserProfileResponse {
     pub identity: Option<String>,
     pub identity_other: Option<String>,
     pub scenario: Option<String>,
+    pub scenarios: Vec<String>,
     pub scenario_other: Option<String>,
     pub purposes: Vec<String>,
     pub purpose_other: Option<String>,
@@ -74,6 +75,8 @@ pub struct UpdateUserProfileRequest {
     pub identity: Option<String>,
     pub identity_other: Option<String>,
     pub scenario: Option<String>,
+    #[serde(default)]
+    pub scenarios: Vec<String>,
     pub scenario_other: Option<String>,
     #[serde(default)]
     pub purposes: Vec<String>,

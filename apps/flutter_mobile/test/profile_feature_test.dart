@@ -19,6 +19,7 @@ void main() {
       'identity': '其他',
       'identity_other': '独立开发者',
       'scenario': '学科竞赛',
+      'scenarios': ['学科竞赛', '项目路演'],
       'scenario_other': null,
       'purposes': ['提升表达', '其他'],
       'purpose_other': '验证架构',
@@ -41,6 +42,7 @@ void main() {
     });
 
     expect(profile.displayIdentity, '独立开发者');
+    expect(profile.displayScenarios, ['学科竞赛', '项目路演']);
     expect(profile.displayPurposes, ['提升表达', '验证架构']);
     expect(activity.totalPractices, 2);
     expect(activity.days.single.practiceCount, 1);
@@ -101,6 +103,45 @@ void main() {
     expect(api.update?.identity, isNull);
     expect(api.update?.purposes, isEmpty);
   });
+
+  testWidgets('onboarding stores more than one training scenario', (
+    tester,
+  ) async {
+    final api = _ProfileApiClient();
+    final router = GoRouter(
+      initialLocation: '/onboarding',
+      routes: [
+        GoRoute(
+          path: '/onboarding',
+          builder: (context, state) => const OnboardingScreen(),
+        ),
+        GoRoute(
+          path: '/projects',
+          builder: (context, state) => const Scaffold(body: Text('项目列表')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+
+    await tester.tap(find.text('本科生'));
+    await tester.tap(find.text('继续'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('毕业答辩'));
+    await tester.tap(find.text('学科竞赛'));
+    await tester.tap(find.text('继续'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('完成设置'));
+    await tester.pumpAndSettle();
+
+    expect(api.update?.scenarios, ['毕业答辩', '学科竞赛']);
+    expect(find.text('项目列表'), findsOneWidget);
+  });
 }
 
 class _ProfileApiClient extends ApiClient {
@@ -119,7 +160,7 @@ class _ProfileApiClient extends ApiClient {
       createdAt: DateTime(2026, 9, 29),
       updatedAt: DateTime(2026, 9, 29),
       identity: update.identity,
-      scenario: update.scenario,
+      scenarios: update.scenarios,
     );
   }
 }

@@ -28,6 +28,7 @@ pub mod user_profile {
         pub identity: Option<String>,
         pub identity_other: Option<String>,
         pub scenario: Option<String>,
+        pub scenarios_json: Json,
         pub scenario_other: Option<String>,
         pub purposes_json: Json,
         pub purpose_other: Option<String>,

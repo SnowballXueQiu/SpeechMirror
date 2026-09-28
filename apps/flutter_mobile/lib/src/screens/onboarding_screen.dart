@@ -21,7 +21,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _purposeOther = TextEditingController();
   var _step = 0;
   String? _identity;
-  String? _scenario;
+  final Set<String> _scenarios = {};
   final Set<String> _purposes = {};
   var _researchConsent = false;
   var _saving = false;
@@ -152,16 +152,20 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     const _StepHeading(
       number: '02',
       title: '主要训练场景',
-      description: '言镜会据此组织评委视角和训练重点。',
+      description: '可多选，言镜会据此组织评委视角和训练重点。',
     ),
     const SizedBox(height: 24),
     for (final option in profileScenarios)
       _OptionTile(
         label: option,
-        selected: _scenario == option,
-        onTap: () => setState(() => _scenario = option),
+        selected: _scenarios.contains(option),
+        onTap: () => setState(() {
+          _scenarios.contains(option)
+              ? _scenarios.remove(option)
+              : _scenarios.add(option);
+        }),
       ),
-    if (_scenario == '其他') ...[
+    if (_scenarios.contains('其他')) ...[
       const SizedBox(height: 10),
       TextField(
         controller: _scenarioOther,
@@ -238,7 +242,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       showError(context, '请填写你的身份，或选择其他选项');
       return;
     }
-    if (_scenario == '其他' && _scenarioOther.text.trim().isEmpty) {
+    if (_scenarios.contains('其他') && _scenarioOther.text.trim().isEmpty) {
       showError(context, '请填写使用场景，或选择其他选项');
       return;
     }
@@ -251,7 +255,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   Future<void> _skip() async {
     _identity = null;
-    _scenario = null;
+    _scenarios.clear();
     _purposes.clear();
     _researchConsent = false;
     await _save();
@@ -268,8 +272,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               identityOther: _identity == '其他'
                   ? _identityOther.text.trim()
                   : null,
-              scenario: _scenario,
-              scenarioOther: _scenario == '其他'
+              scenarios: _scenarios.toList(),
+              scenarioOther: _scenarios.contains('其他')
                   ? _scenarioOther.text.trim()
                   : null,
               purposes: _purposes.toList(),

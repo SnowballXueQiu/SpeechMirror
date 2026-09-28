@@ -11,7 +11,7 @@ class UserProfile {
     this.bio,
     this.identity,
     this.identityOther,
-    this.scenario,
+    this.scenarios = const [],
     this.scenarioOther,
     this.purposeOther,
   });
@@ -21,7 +21,7 @@ class UserProfile {
   final String? bio;
   final String? identity;
   final String? identityOther;
-  final String? scenario;
+  final List<String> scenarios;
   final String? scenarioOther;
   final List<String> purposes;
   final String? purposeOther;
@@ -32,7 +32,10 @@ class UserProfile {
   final DateTime updatedAt;
 
   String? get displayIdentity => identity == '其他' ? identityOther : identity;
-  String? get displayScenario => scenario == '其他' ? scenarioOther : scenario;
+  String? get scenario => scenarios.isEmpty ? null : scenarios.first;
+  List<String> get displayScenarios => scenarios
+      .map((scenario) => scenario == '其他' ? scenarioOther ?? '其他' : scenario)
+      .toList();
   List<String> get displayPurposes => purposes
       .map((purpose) => purpose == '其他' ? purposeOther ?? '其他' : purpose)
       .toList();
@@ -43,7 +46,9 @@ class UserProfile {
     bio: json['bio'] as String?,
     identity: json['identity'] as String?,
     identityOther: json['identity_other'] as String?,
-    scenario: json['scenario'] as String?,
+    scenarios:
+        (json['scenarios'] as List<dynamic>?)?.cast<String>() ??
+        [if (json['scenario'] case final String scenario) scenario],
     scenarioOther: json['scenario_other'] as String?,
     purposes: (json['purposes'] as List<dynamic>? ?? const []).cast<String>(),
     purposeOther: json['purpose_other'] as String?,
@@ -60,7 +65,7 @@ class UserProfileUpdate {
     this.bio,
     this.identity,
     this.identityOther,
-    this.scenario,
+    this.scenarios = const [],
     this.scenarioOther,
     this.purposes = const [],
     this.purposeOther,
@@ -71,7 +76,7 @@ class UserProfileUpdate {
   final String? bio;
   final String? identity;
   final String? identityOther;
-  final String? scenario;
+  final List<String> scenarios;
   final String? scenarioOther;
   final List<String> purposes;
   final String? purposeOther;
@@ -82,7 +87,8 @@ class UserProfileUpdate {
     'bio': bio,
     'identity': identity,
     'identity_other': identityOther,
-    'scenario': scenario,
+    'scenario': scenarios.isEmpty ? null : scenarios.first,
+    'scenarios': scenarios,
     'scenario_other': scenarioOther,
     'purposes': purposes,
     'purpose_other': purposeOther,

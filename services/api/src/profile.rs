@@ -79,8 +79,22 @@ async fn update_profile(
     let bio = normalize_optional(body.bio, 200, "bio")?;
     let identity = normalize_choice(body.identity, IDENTITIES, "identity")?;
     let identity_other = normalize_other(body.identity_other, identity.as_deref(), "identity")?;
-    let scenario = normalize_choice(body.scenario, SCENARIOS, "scenario")?;
-    let scenario_other = normalize_other(body.scenario_other, scenario.as_deref(), "scenario")?;
+    let legacy_scenario = normalize_choice(body.scenario, SCENARIOS, "scenario")?;
+    let scenario_values = if body.scenarios.is_empty() {
+        legacy_scenario.into_iter().collect()
+    } else {
+        body.scenarios
+    };
+    let scenarios = normalize_choices(scenario_values, SCENARIOS, "scenario")?;
+    let scenario_other = normalize_other(
+        body.scenario_other,
+        scenarios
+            .iter()
+            .any(|item| item == "其他")
+            .then_some("其他"),
+        "scenario",
+    )?;
+    let scenario = scenarios.first().cloned();
     if body.purposes.len() > 7 {
         return Err(ApiError::BadRequest(
             "no more than 7 purposes may be selected".into(),
@@ -112,6 +126,7 @@ async fn update_profile(
         active.identity = Set(identity);
         active.identity_other = Set(identity_other);
         active.scenario = Set(scenario);
+        active.scenarios_json = Set(json!(scenarios));
         active.scenario_other = Set(scenario_other);
         active.purposes_json = Set(purposes_json);
         active.purpose_other = Set(purpose_other);
@@ -126,6 +141,7 @@ async fn update_profile(
             identity: Set(identity),
             identity_other: Set(identity_other),
             scenario: Set(scenario),
+            scenarios_json: Set(json!(scenarios)),
             scenario_other: Set(scenario_other),
             purposes_json: Set(purposes_json),
             purpose_other: Set(purpose_other),
@@ -185,6 +201,7 @@ async fn upload_avatar(
             identity: Set(None),
             identity_other: Set(None),
             scenario: Set(None),
+            scenarios_json: Set(json!([])),
             scenario_other: Set(None),
             purposes_json: Set(json!([])),
             purpose_other: Set(None),
@@ -371,6 +388,17 @@ async fn load_profile(state: &AppState, user_id: &str) -> ApiResult<UserProfileR
         .as_ref()
         .and_then(|item| serde_json::from_value::<Vec<String>>(item.purposes_json.clone()).ok())
         .unwrap_or_default();
+    let scenarios = profile
+        .as_ref()
+        .and_then(|item| serde_json::from_value::<Vec<String>>(item.scenarios_json.clone()).ok())
+        .filter(|items| !items.is_empty())
+        .or_else(|| {
+            profile
+                .as_ref()
+                .and_then(|item| item.scenario.clone())
+                .map(|item| vec![item])
+        })
+        .unwrap_or_default();
     Ok(UserProfileResponse {
         id: account.id,
         username: account.username,
@@ -380,6 +408,7 @@ async fn load_profile(state: &AppState, user_id: &str) -> ApiResult<UserProfileR
             .as_ref()
             .and_then(|item| item.identity_other.clone()),
         scenario: profile.as_ref().and_then(|item| item.scenario.clone()),
+        scenarios,
         scenario_other: profile
             .as_ref()
             .and_then(|item| item.scenario_other.clone()),
@@ -427,6 +456,25 @@ fn normalize_choice(
         return Err(ApiError::BadRequest(format!("unknown {field} option")));
     }
     Ok(value)
+}
+
+fn normalize_choices(values: Vec<String>, options: &[&str], field: &str) -> ApiResult<Vec<String>> {
+    if values.len() > options.len() {
+        return Err(ApiError::BadRequest(format!(
+            "too many {field} options were selected"
+        )));
+    }
+    let mut normalized = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if !options.contains(&value) {
+            return Err(ApiError::BadRequest(format!("unknown {field} option")));
+        }
+        if !normalized.iter().any(|item| item == value) {
+            normalized.push(value.to_owned());
+        }
+    }
+    Ok(normalized)
 }
 
 fn normalize_other(

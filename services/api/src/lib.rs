@@ -500,7 +500,7 @@ mod tests {
                 json!({
                     "bio":"  专注于智能答辩训练  ",
                     "identity":"本科生",
-                    "scenario":"创新创业大赛",
+                    "scenarios":["创新创业大赛", "学科竞赛"],
                     "purposes":["提升表达", "准备评委提问"],
                     "onboarding_completed":true,
                     "research_consent":true
@@ -515,6 +515,7 @@ mod tests {
                 .unwrap();
         assert_eq!(updated["bio"], "专注于智能答辩训练");
         assert_eq!(updated["identity"], "本科生");
+        assert_eq!(updated["scenarios"], json!(["创新创业大赛", "学科竞赛"]));
         assert_eq!(updated["research_consent"], true);
 
         let invalid = router

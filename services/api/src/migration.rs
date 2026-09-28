@@ -5,7 +5,43 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(InitialSchema), Box::new(UserProfileSchema)]
+        vec![
+            Box::new(InitialSchema),
+            Box::new(UserProfileSchema),
+            Box::new(MultiScenarioSchema),
+        ]
+    }
+}
+
+struct MultiScenarioSchema;
+
+#[async_trait::async_trait]
+impl MigrationName for MultiScenarioSchema {
+    fn name(&self) -> &str {
+        "m20260929_000003_multi_scenario_profiles"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for MultiScenarioSchema {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "ALTER TABLE user_profiles ADD COLUMN scenarios_json JSON NOT NULL DEFAULT '[]'",
+            )
+            .await?;
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "UPDATE user_profiles SET scenarios_json = json_array(scenario) WHERE scenario IS NOT NULL AND scenarios_json = '[]'",
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
+        Ok(())
     }
 }
 
