@@ -952,7 +952,7 @@ fn question_generation_prompt(
             .join("\n")
     };
     format!(
-        "现在需要为以下尚未覆盖的维度各生成一个真实评委问题：{}。先综合现场陈述和已经进行的问答，选择该维度中最值得核查的具体决策或缺口。问题必须能让答辩者解释为什么这样做、具体如何实现、如何验证或替代方案为何未选；每题只问一个核心问题，80字以内。question只写评委会真正说出口的话，不得复述规则，不得引用整段材料，不得出现‘每个关键问题’‘评分’‘建议’等元话语。category必须逐字使用指定维度。evidence至少一项，chunk_id复制方括号编号，quote复制对应材料中的连续完整原文。只返回JSON：{{\"questions\":[{{\"category\":\"背景与需求\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"完整材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n已经问过的问题（不得换句式重复）：\n{previous}\n\n已经进行的问答：\n{answer_history}\n\n现场陈述转写：\n{presentation}\n\n项目材料：\n{material}",
+        "现在需要为以下尚未覆盖的维度各生成一个真实评委问题：{}。先综合现场陈述和已经进行的问答，选择该维度中最值得核查的具体决策或缺口。问题必须能让答辩者解释为什么这样做、具体如何实现、如何验证或替代方案为何未选；每题只问一个核心问题，80字以内。question只写评委会真正说出口的话，不得复述规则，不得引用整段材料，不得出现‘每个关键问题’‘评分’‘建议’等元话语，也不得以‘第一’‘第二’‘第三’‘一、’‘二、’‘1.’‘（一）’等序号开头。category必须逐字使用指定维度。evidence至少一项，chunk_id复制方括号编号，quote复制对应材料中的连续完整原文。只返回JSON：{{\"questions\":[{{\"category\":\"背景与需求\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"完整材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n已经问过的问题（不得换句式重复）：\n{previous}\n\n已经进行的问答：\n{answer_history}\n\n现场陈述转写：\n{presentation}\n\n项目材料：\n{material}",
         missing.join("、"),
         missing.len(),
     )
@@ -1139,6 +1139,84 @@ fn evidence_focus(quote: &str) -> String {
     focus
 }
 
+fn sanitize_question_prefix(input: &str) -> String {
+    let trimmed = input.trim();
+    let characters = trimmed.chars().collect::<Vec<_>>();
+    if characters.is_empty() {
+        return String::new();
+    }
+    let ordinal = |character: char| {
+        character.is_ascii_digit()
+            || matches!(
+                character,
+                '零' | '〇'
+                    | '一'
+                    | '二'
+                    | '三'
+                    | '四'
+                    | '五'
+                    | '六'
+                    | '七'
+                    | '八'
+                    | '九'
+                    | '十'
+                    | '百'
+                    | '两'
+            )
+    };
+    let delimiter =
+        |character: char| matches!(character, '、' | '，' | ',' | '：' | ':' | '.' | '．');
+    let strip_from = |index: usize| {
+        characters[index..]
+            .iter()
+            .collect::<String>()
+            .trim_start()
+            .to_owned()
+    };
+
+    if matches!(characters[0], '(' | '（') {
+        let closing = if characters[0] == '(' { ')' } else { '）' };
+        if let Some(end) = characters
+            .iter()
+            .position(|character| *character == closing)
+            && end > 1
+            && characters[1..end]
+                .iter()
+                .all(|character| ordinal(*character))
+        {
+            let mut index = end + 1;
+            if characters
+                .get(index)
+                .is_some_and(|character| delimiter(*character))
+            {
+                index += 1;
+            }
+            return strip_from(index);
+        }
+    }
+
+    let mut index = usize::from(characters[0] == '第');
+    let numeral_start = index;
+    while characters
+        .get(index)
+        .is_some_and(|character| ordinal(*character))
+    {
+        index += 1;
+    }
+    if index > numeral_start
+        && characters
+            .get(index)
+            .is_some_and(|character| delimiter(*character))
+        && !(matches!(characters[index], '.' | '．')
+            && characters
+                .get(index + 1)
+                .is_some_and(|character| character.is_ascii_digit()))
+    {
+        return strip_from(index + 1);
+    }
+    trimmed.to_owned()
+}
+
 fn fallback_question(category: &str, variant: usize, evidence: &EvidenceRef) -> String {
     let focus = evidence_focus(&evidence.quote);
     let question = match (category, variant) {
@@ -1192,7 +1270,7 @@ fn fallback_question(category: &str, variant: usize, evidence: &EvidenceRef) -> 
         }
         _ => format!("{focus}。为什么这样设计，如何验证其效果？"),
     };
-    question.chars().take(100).collect()
+    sanitize_question_prefix(&question.chars().take(100).collect::<String>())
 }
 
 fn fill_fallback_question_candidates_with_history(
@@ -1273,7 +1351,7 @@ fn accept_question_candidates_with_history(
         else {
             continue;
         };
-        let Some(question) = item
+        let Some(raw_question) = item
             .get("question")
             .and_then(Value::as_str)
             .map(str::trim)
@@ -1281,6 +1359,10 @@ fn accept_question_candidates_with_history(
         else {
             continue;
         };
+        let question = sanitize_question_prefix(raw_question);
+        if question.is_empty() {
+            continue;
+        }
         if question.chars().count() > 100
             || question.matches('？').count() > 1
             || question.matches('?').count() > 1
@@ -1306,10 +1388,10 @@ fn accept_question_candidates_with_history(
         if evidence.is_empty() {
             continue;
         }
-        if !question_has_grounding(question, &evidence)
+        if !question_has_grounding(&question, &evidence)
             || !candidate_is_novel(
                 category,
-                question,
+                &question,
                 &evidence,
                 candidates,
                 previous_questions,
@@ -1320,7 +1402,7 @@ fn accept_question_candidates_with_history(
         }
         candidates.push(QuestionCandidate {
             category: category.to_owned(),
-            question: question.to_owned(),
+            question,
             evidence,
         });
         missing.remove(category_position);
@@ -1442,11 +1524,46 @@ async fn submit_answer(
     if body.answer_text.trim().is_empty() {
         return Err(ApiError::BadRequest("answer cannot be empty".into()));
     }
+    let request_id = body
+        .request_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    if request_id
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 128)
+    {
+        return Err(ApiError::BadRequest("request_id is too long".into()));
+    }
     let session_answers = jury_answer::Entity::find()
         .filter(jury_answer::Column::SessionId.eq(&body.session_id))
         .order_by_asc(jury_answer::Column::CreatedAt)
         .all(&state.db)
         .await?;
+    if let Some(request_id) = request_id.as_deref()
+        && let Some(existing) = session_answers.iter().find(|answer| {
+            answer
+                .evaluation_json
+                .get("request_id")
+                .and_then(Value::as_str)
+                == Some(request_id)
+        })
+    {
+        let existing_parent = existing
+            .evaluation_json
+            .get("parent_answer_id")
+            .and_then(Value::as_str);
+        if existing.question_id != question_id
+            || existing.answer_text != body.answer_text
+            || existing_parent != body.parent_answer_id.as_deref()
+        {
+            return Err(ApiError::Conflict(
+                "request_id was already used for a different answer".into(),
+            ));
+        }
+        return Ok(Json(answer_response(existing.clone())));
+    }
     let mut answered_question_ids = session_answers
         .iter()
         .map(|answer| answer.question_id.as_str())
@@ -1501,7 +1618,7 @@ async fn submit_answer(
             ),
         )
     } else {
-        (question.question.clone(), String::new())
+        (sanitize_question_prefix(&question.question), String::new())
     };
     let chunks = retrieve_chunks(
         &state,
@@ -1612,6 +1729,9 @@ async fn submit_answer(
         "parent_answer_id".into(),
         serde_json::to_value(&body.parent_answer_id)?,
     );
+    if let Some(request_id) = request_id {
+        evaluation_object.insert("request_id".into(), json!(request_id));
+    }
     let model = jury_answer::ActiveModel {
         id: Set(Uuid::new_v4().to_string()),
         question_id: Set(question_id),
@@ -1623,16 +1743,31 @@ async fn submit_answer(
     .insert(&state.db)
     .await?;
     refresh_report_qa(&state, &model.session_id).await?;
-    Ok(Json(AnswerResponse {
+    Ok(Json(answer_response(model)))
+}
+
+fn answer_response(model: jury_answer::Model) -> AnswerResponse {
+    let asked_question = model
+        .evaluation_json
+        .get("asked_question")
+        .and_then(Value::as_str)
+        .map(sanitize_question_prefix)
+        .unwrap_or_else(|| "评委问题".to_owned());
+    let parent_answer_id = model
+        .evaluation_json
+        .get("parent_answer_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    AnswerResponse {
         id: model.id,
         question_id: model.question_id,
         session_id: model.session_id,
         asked_question,
-        parent_answer_id: body.parent_answer_id,
+        parent_answer_id,
         answer_text: model.answer_text,
-        evaluation,
+        evaluation: model.evaluation_json,
         created_at: model.created_at,
-    }))
+    }
 }
 
 fn fallback_answer_evaluation(
@@ -1830,7 +1965,8 @@ fn material_overlap_count(answer_text: &str, evidence: &[EvidenceRef]) -> usize 
 
 fn normalized_follow_up(evaluation: &Value) -> Option<String> {
     let follow_up = evaluation.get("follow_up")?.as_str()?.trim();
-    (!follow_up.is_empty() && follow_up.chars().count() <= 500).then(|| follow_up.to_owned())
+    let follow_up = sanitize_question_prefix(follow_up);
+    (!follow_up.is_empty() && follow_up.chars().count() <= 500).then_some(follow_up)
 }
 
 fn answer_admits_unknown(answer: &str) -> bool {
@@ -2039,7 +2175,7 @@ fn question_response(model: jury_question::Model) -> ApiResult<QuestionResponse>
         project_id: model.project_id,
         session_id: model.session_id,
         category: model.category,
-        question: model.question,
+        question: sanitize_question_prefix(&model.question),
         evidence: serde_json::from_value(model.evidence_json)?,
         created_at: model.created_at,
     })
@@ -2278,6 +2414,49 @@ mod route_tests {
 
         assert!(!focus.ends_with("Prov…"));
         assert!(focus.contains("OcrProvider"));
+    }
+
+    #[test]
+    fn question_prefixes_are_removed_without_damaging_real_terms() {
+        assert_eq!(
+            sanitize_question_prefix("第三，用户怎样判断改进建议来自哪些材料？"),
+            "用户怎样判断改进建议来自哪些材料？"
+        );
+        assert_eq!(
+            sanitize_question_prefix("二、需求分析与使用场景是怎样验证的？"),
+            "需求分析与使用场景是怎样验证的？"
+        );
+        assert_eq!(
+            sanitize_question_prefix("（一）请说明知识库如何更新？"),
+            "请说明知识库如何更新？"
+        );
+        assert_eq!(
+            sanitize_question_prefix("2. 请说明为什么选择SQLite？"),
+            "请说明为什么选择SQLite？"
+        );
+        assert_eq!(
+            sanitize_question_prefix("第一代系统为什么采用本地数据库？"),
+            "第一代系统为什么采用本地数据库？"
+        );
+        assert_eq!(
+            sanitize_question_prefix("1.5倍调用量会带来什么瓶颈？"),
+            "1.5倍调用量会带来什么瓶颈？"
+        );
+    }
+
+    #[test]
+    fn accepted_questions_are_sanitized_before_storage() {
+        let chunks = vec![question_test_chunk()];
+        let plan = question_category_plan(1);
+        let value = json!({"questions": [
+            {"category":"背景与需求", "question":"第三，端云协同架构解决了什么需求？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+        ]});
+        let mut candidates = Vec::new();
+
+        accept_question_candidates(&value, &chunks, &plan, &mut candidates);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].question, "端云协同架构解决了什么需求？");
     }
 
     #[test]

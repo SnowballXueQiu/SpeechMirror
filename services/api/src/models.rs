@@ -238,6 +238,7 @@ pub struct SubmitAnswerRequest {
     pub session_id: String,
     pub answer_text: String,
     pub parent_answer_id: Option<String>,
+    pub request_id: Option<String>,
     #[serde(default)]
     pub elapsed_seconds: Option<i32>,
 }
