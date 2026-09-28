@@ -1226,6 +1226,7 @@ fn fill_fallback_question_candidates_with_history(
         let variant = (offset + index) % 2;
         let question = fallback_question(category, variant, &evidence);
         if !candidate_is_novel(
+            category,
             &question,
             std::slice::from_ref(&evidence),
             candidates,
@@ -1307,6 +1308,7 @@ fn accept_question_candidates_with_history(
         }
         if !question_has_grounding(question, &evidence)
             || !candidate_is_novel(
+                category,
                 question,
                 &evidence,
                 candidates,
@@ -1329,22 +1331,56 @@ fn accept_question_candidates_with_history(
 }
 
 fn candidate_is_novel(
+    category: &str,
     question: &str,
     _evidence: &[EvidenceRef],
     candidates: &[QuestionCandidate],
     previous_questions: &[String],
     _previous_evidence: &[EvidenceRef],
 ) -> bool {
-    let question_is_repeated = candidates
+    let question_is_repeated = candidates.iter().any(|candidate| {
+        candidate.question == question
+            || (candidate.category == category
+                && questions_are_near_duplicates(&candidate.question, question))
+    }) || previous_questions
         .iter()
-        .any(|candidate| candidate.question == question)
-        || previous_questions
-            .iter()
-            .any(|old| old == question || pair_overlap_count(old, question) >= 5);
+        .any(|old| question_similarity_percent(old, question) >= 80);
     if question_is_repeated {
         return false;
     }
     true
+}
+
+fn questions_are_near_duplicates(left: &str, right: &str) -> bool {
+    if left.trim() == right.trim() {
+        return true;
+    }
+    question_similarity_percent(left, right) >= 65
+}
+
+fn question_similarity_percent(left: &str, right: &str) -> usize {
+    let intent_bigrams = |question: &str| {
+        let intent = question
+            .rsplit(['。', '；', ';'])
+            .map(str::trim)
+            .find(|part| !part.is_empty())
+            .unwrap_or(question);
+        intent
+            .chars()
+            .filter(|character| character.is_alphanumeric())
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|pair| pair.iter().collect::<String>())
+            .collect::<HashSet<_>>()
+    };
+    let left = intent_bigrams(left);
+    let right = intent_bigrams(right);
+    let smaller = left.len().min(right.len());
+    if smaller < 4 {
+        return 0;
+    }
+    let common = left.intersection(&right).count();
+    common * 100 / smaller
 }
 
 fn order_question_candidates(
@@ -2193,7 +2229,7 @@ mod route_tests {
             {"category":"背景与需求", "question":"端云协同架构如何落地？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
         ]});
         let mut candidates = Vec::new();
-        let previous_questions = vec!["端云协同架构如何实现？".to_owned()];
+        let previous_questions = vec!["端云协同架构具体如何落地？".to_owned()];
 
         accept_question_candidates_with_history(
             &value,
@@ -2268,6 +2304,29 @@ mod route_tests {
 
         assert_eq!(candidates.len(), 5);
         assert!(order_question_candidates(&plan, candidates).len() == 5);
+    }
+
+    #[test]
+    fn fallback_questions_can_reuse_one_fact_for_different_question_intents() {
+        let chunks = vec![question_test_chunk()];
+        let plan = vec!["技术架构", "风险与边界", "成本与落地"];
+        let mut candidates = Vec::new();
+
+        fill_fallback_question_candidates_with_history(
+            &plan,
+            &chunks,
+            &mut candidates,
+            "single-fact-session",
+            &[],
+            &[],
+        );
+
+        assert_eq!(candidates.len(), 3);
+        assert!(
+            candidates
+                .windows(2)
+                .all(|pair| !questions_are_near_duplicates(&pair[0].question, &pair[1].question))
+        );
     }
 
     #[test]
