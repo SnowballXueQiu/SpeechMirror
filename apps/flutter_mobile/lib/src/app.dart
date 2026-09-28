@@ -6,7 +6,11 @@ import 'auth_controller.dart';
 import 'screens/auth_screen.dart';
 import 'screens/document_text_screen.dart';
 import 'screens/jury_screen.dart';
+import 'screens/legal_document_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/project_detail_screen.dart';
+import 'screens/profile_preferences_screen.dart';
+import 'screens/profile_screen.dart';
 import 'screens/projects_screen.dart';
 import 'screens/report_screen.dart';
 import 'screens/training_screen.dart';
@@ -22,11 +26,39 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (!auth.initialized) return null;
       final signingIn = state.matchedLocation == '/login';
       if (!auth.authenticated) return signingIn ? null : '/login';
-      if (signingIn) return '/projects';
+      final onboarding = state.matchedLocation == '/onboarding';
+      if (auth.needsOnboarding && !onboarding) return '/onboarding';
+      if (!auth.needsOnboarding && (signingIn || onboarding)) {
+        return '/projects';
+      }
       return null;
     },
     routes: [
       GoRoute(path: '/login', builder: (context, state) => const AuthScreen()),
+      GoRoute(
+        path: '/onboarding',
+        builder: (context, state) => const OnboardingScreen(),
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileScreen(),
+        routes: [
+          GoRoute(
+            path: 'preferences',
+            builder: (context, state) => const ProfilePreferencesScreen(),
+          ),
+          GoRoute(
+            path: 'privacy',
+            builder: (context, state) =>
+                const LegalDocumentScreen(type: LegalDocumentType.privacy),
+          ),
+          GoRoute(
+            path: 'terms',
+            builder: (context, state) =>
+                const LegalDocumentScreen(type: LegalDocumentType.terms),
+          ),
+        ],
+      ),
       GoRoute(
         path: '/projects',
         builder: (context, state) => const ProjectsScreen(),

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api_client.dart';
+import 'models.dart';
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
 final authControllerProvider = ChangeNotifierProvider<AuthController>(
@@ -15,11 +16,17 @@ class AuthController extends ChangeNotifier {
   bool authenticated = false;
   bool busy = false;
   String? error;
+  UserProfile? profile;
+  bool _activityRecorded = false;
+
+  bool get needsOnboarding =>
+      authenticated && profile != null && !profile!.onboardingCompleted;
 
   Future<void> restore() async {
     if (initialized) return;
     try {
       authenticated = await _api.restoreSession();
+      if (authenticated) await _hydrateProfile();
     } finally {
       initialized = true;
       notifyListeners();
@@ -37,6 +44,7 @@ class AuthController extends ChangeNotifier {
     try {
       await _api.login(username.trim(), password, register: register);
       authenticated = true;
+      await _hydrateProfile();
       return true;
     } catch (exception) {
       error = exception.toString();
@@ -51,6 +59,41 @@ class AuthController extends ChangeNotifier {
   Future<void> logout() async {
     await _api.logout();
     authenticated = false;
+    profile = null;
+    _activityRecorded = false;
     notifyListeners();
+  }
+
+  Future<UserProfile?> refreshProfile() async {
+    if (!authenticated) return null;
+    try {
+      profile = await _api.getProfile();
+      notifyListeners();
+      return profile;
+    } catch (_) {
+      return profile;
+    }
+  }
+
+  Future<UserProfile> updateProfile(UserProfileUpdate update) async {
+    profile = await _api.updateProfile(update);
+    notifyListeners();
+    return profile!;
+  }
+
+  Future<void> _hydrateProfile() async {
+    try {
+      profile = await _api.getProfile();
+    } catch (_) {
+      profile = null;
+    }
+    if (!_activityRecorded) {
+      _activityRecorded = true;
+      try {
+        await _api.recordActivity();
+      } catch (_) {
+        // Activity telemetry must never prevent access to the app.
+      }
+    }
   }
 }

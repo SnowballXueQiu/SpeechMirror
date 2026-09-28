@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,8 +9,6 @@ import '../models.dart';
 import '../project_editor.dart';
 import '../theme.dart';
 import '../widgets.dart';
-
-enum _AccountAction { logout }
 
 class ProjectsScreen extends ConsumerStatefulWidget {
   const ProjectsScreen({super.key});
@@ -51,22 +51,9 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
           icon: const Icon(Icons.add_rounded),
         ),
         const SizedBox(width: 4),
-        PopupMenuButton<_AccountAction>(
-          tooltip: '账户菜单',
-          icon: const Icon(Icons.more_horiz_rounded),
-          onSelected: (_) => ref.read(authControllerProvider).logout(),
-          itemBuilder: (context) => const [
-            PopupMenuItem(
-              value: _AccountAction.logout,
-              child: Row(
-                children: [
-                  Icon(Icons.logout_rounded, size: 20),
-                  SizedBox(width: 12),
-                  Text('退出登录'),
-                ],
-              ),
-            ),
-          ],
+        _AccountAvatar(
+          key: ValueKey(ref.watch(authControllerProvider).profile?.updatedAt),
+          onTap: () => context.push('/profile'),
         ),
         const SizedBox(width: 12),
       ],
@@ -156,6 +143,64 @@ class _ProjectsScreenState extends ConsumerState<ProjectsScreen> {
   Future<void> _openProject(String projectId) async {
     await context.push<void>('/projects/$projectId');
     if (mounted) _reload();
+  }
+}
+
+class _AccountAvatar extends ConsumerStatefulWidget {
+  const _AccountAvatar({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  ConsumerState<_AccountAvatar> createState() => _AccountAvatarState();
+}
+
+class _AccountAvatarState extends ConsumerState<_AccountAvatar> {
+  Future<List<int>?>? _avatar;
+
+  @override
+  void initState() {
+    super.initState();
+    final hasAvatar =
+        ref.read(authControllerProvider).profile?.hasAvatar ?? false;
+    if (hasAvatar) {
+      _avatar = ref
+          .read(apiClientProvider)
+          .getAvatarBytes()
+          .then<List<int>?>((value) => value)
+          .catchError((_) => null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final profile = ref.watch(authControllerProvider).profile;
+    return Tooltip(
+      message: '用户中心',
+      child: InkWell(
+        onTap: widget.onTap,
+        customBorder: const CircleBorder(),
+        child: FutureBuilder<List<int>?>(
+          future: _avatar,
+          builder: (context, snapshot) => CircleAvatar(
+            radius: 19,
+            backgroundColor: AppColors.paperStrong,
+            backgroundImage: snapshot.data?.isNotEmpty == true
+                ? MemoryImage(Uint8List.fromList(snapshot.data!))
+                : null,
+            child: snapshot.data?.isNotEmpty == true
+                ? null
+                : Text(
+                    profile?.username.characters.first.toUpperCase() ?? 'U',
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

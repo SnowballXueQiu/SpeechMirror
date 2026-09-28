@@ -1,3 +1,147 @@
+class UserProfile {
+  const UserProfile({
+    required this.id,
+    required this.username,
+    required this.purposes,
+    required this.onboardingCompleted,
+    required this.researchConsent,
+    required this.hasAvatar,
+    required this.createdAt,
+    required this.updatedAt,
+    this.bio,
+    this.identity,
+    this.identityOther,
+    this.scenario,
+    this.scenarioOther,
+    this.purposeOther,
+  });
+
+  final String id;
+  final String username;
+  final String? bio;
+  final String? identity;
+  final String? identityOther;
+  final String? scenario;
+  final String? scenarioOther;
+  final List<String> purposes;
+  final String? purposeOther;
+  final bool onboardingCompleted;
+  final bool researchConsent;
+  final bool hasAvatar;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  String? get displayIdentity => identity == '其他' ? identityOther : identity;
+  String? get displayScenario => scenario == '其他' ? scenarioOther : scenario;
+  List<String> get displayPurposes => purposes
+      .map((purpose) => purpose == '其他' ? purposeOther ?? '其他' : purpose)
+      .toList();
+
+  factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
+    id: json['id'] as String,
+    username: json['username'] as String,
+    bio: json['bio'] as String?,
+    identity: json['identity'] as String?,
+    identityOther: json['identity_other'] as String?,
+    scenario: json['scenario'] as String?,
+    scenarioOther: json['scenario_other'] as String?,
+    purposes: (json['purposes'] as List<dynamic>? ?? const []).cast<String>(),
+    purposeOther: json['purpose_other'] as String?,
+    onboardingCompleted: json['onboarding_completed'] as bool? ?? false,
+    researchConsent: json['research_consent'] as bool? ?? false,
+    hasAvatar: json['has_avatar'] as bool? ?? false,
+    createdAt: DateTime.parse(json['created_at'] as String),
+    updatedAt: DateTime.parse(json['updated_at'] as String),
+  );
+}
+
+class UserProfileUpdate {
+  const UserProfileUpdate({
+    this.bio,
+    this.identity,
+    this.identityOther,
+    this.scenario,
+    this.scenarioOther,
+    this.purposes = const [],
+    this.purposeOther,
+    required this.onboardingCompleted,
+    this.researchConsent = false,
+  });
+
+  final String? bio;
+  final String? identity;
+  final String? identityOther;
+  final String? scenario;
+  final String? scenarioOther;
+  final List<String> purposes;
+  final String? purposeOther;
+  final bool onboardingCompleted;
+  final bool researchConsent;
+
+  Map<String, dynamic> toJson() => {
+    'bio': bio,
+    'identity': identity,
+    'identity_other': identityOther,
+    'scenario': scenario,
+    'scenario_other': scenarioOther,
+    'purposes': purposes,
+    'purpose_other': purposeOther,
+    'onboarding_completed': onboardingCompleted,
+    'research_consent': researchConsent,
+  };
+}
+
+class ActivityDay {
+  const ActivityDay({
+    required this.date,
+    required this.useCount,
+    required this.practiceCount,
+  });
+
+  final DateTime date;
+  final int useCount;
+  final int practiceCount;
+
+  factory ActivityDay.fromJson(Map<String, dynamic> json) => ActivityDay(
+    date: DateTime.parse(json['date'] as String),
+    useCount: (json['use_count'] as num).toInt(),
+    practiceCount: (json['practice_count'] as num).toInt(),
+  );
+}
+
+class ActivitySummary {
+  const ActivitySummary({
+    required this.through,
+    required this.activeDays,
+    required this.totalUses,
+    required this.totalPractices,
+    required this.currentStreak,
+    required this.longestStreak,
+    required this.days,
+  });
+
+  final DateTime through;
+  final int activeDays;
+  final int totalUses;
+  final int totalPractices;
+  final int currentStreak;
+  final int longestStreak;
+  final List<ActivityDay> days;
+
+  factory ActivitySummary.fromJson(Map<String, dynamic> json) =>
+      ActivitySummary(
+        through: DateTime.parse(json['through'] as String),
+        activeDays: (json['active_days'] as num).toInt(),
+        totalUses: (json['total_uses'] as num).toInt(),
+        totalPractices: (json['total_practices'] as num).toInt(),
+        currentStreak: (json['current_streak'] as num).toInt(),
+        longestStreak: (json['longest_streak'] as num).toInt(),
+        days: (json['days'] as List<dynamic>? ?? const [])
+            .map((item) => ActivityDay.fromJson(item as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 class Project {
   const Project({
     required this.id,

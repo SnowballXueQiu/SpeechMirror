@@ -102,6 +102,66 @@ class ApiClient {
     await _clearTokens();
   }
 
+  Future<UserProfile> getProfile() async {
+    final response = await _authorized(
+      () => _dio.get<Map<String, dynamic>>('/me'),
+    );
+    return UserProfile.fromJson(response.data!);
+  }
+
+  Future<UserProfile> updateProfile(UserProfileUpdate update) async {
+    final response = await _authorized(
+      () => _dio.put<Map<String, dynamic>>('/me', data: update.toJson()),
+    );
+    return UserProfile.fromJson(response.data!);
+  }
+
+  Future<List<int>> getAvatarBytes() async {
+    final response = await _authorized<List<int>>(
+      () => _dio.get<List<int>>(
+        '/me/avatar',
+        options: Options(responseType: ResponseType.bytes),
+      ),
+    );
+    return response.data!;
+  }
+
+  Future<void> uploadAvatar(String path) async {
+    final extension = path.split('.').last.toLowerCase();
+    final form = FormData.fromMap({
+      'file': await MultipartFile.fromFile(
+        path,
+        filename: path.split(Platform.pathSeparator).last,
+        contentType: _mediaType(extension),
+      ),
+    });
+    await _authorized(() => _dio.post('/me/avatar', data: form));
+  }
+
+  Future<void> deleteAvatar() async {
+    await _authorized(() => _dio.delete('/me/avatar'));
+  }
+
+  Future<void> recordActivity([DateTime? now]) async {
+    await _authorized(
+      () => _dio.post(
+        '/me/activity',
+        data: {'local_date': _localDate(now ?? DateTime.now())},
+      ),
+    );
+  }
+
+  Future<ActivitySummary> getActivity([DateTime? through]) async {
+    final localThrough = through ?? DateTime.now();
+    final response = await _authorized(
+      () => _dio.get<Map<String, dynamic>>(
+        '/me/activity',
+        queryParameters: {'through': _localDate(localThrough)},
+      ),
+    );
+    return ActivitySummary.fromJson(response.data!);
+  }
+
   Future<List<Project>> listProjects() async {
     final response = await _authorized(
       () => _dio.get<List<dynamic>>('/projects'),
@@ -217,7 +277,11 @@ class ApiClient {
     final response = await _authorized(
       () => _dio.post<Map<String, dynamic>>(
         '/projects/$projectId/sessions',
-        data: {'target_seconds': seconds, 'local_video_ref': localVideoRef},
+        data: {
+          'target_seconds': seconds,
+          'local_video_ref': localVideoRef,
+          'local_date': _localDate(DateTime.now()),
+        },
       ),
     );
     return RehearsalSession.fromJson(response.data!);
@@ -456,6 +520,11 @@ class ApiClient {
     'jpg' || 'jpeg' => DioMediaType.parse('image/jpeg'),
     _ => DioMediaType.parse('application/octet-stream'),
   };
+
+  String _localDate(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
 }
 
 class PlatformFile {
