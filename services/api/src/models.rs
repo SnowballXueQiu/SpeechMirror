@@ -170,6 +170,14 @@ pub struct AudioWavePoint {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DefenseScoreItem {
+    pub label: String,
+    pub score: i32,
+    pub max_score: i32,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ReportPayload {
     pub session_id: String,
     #[serde(default)]
@@ -186,6 +194,8 @@ pub struct ReportPayload {
     pub timing: DimensionReport,
     pub visual: DimensionReport,
     pub qa: DimensionReport,
+    #[serde(default)]
+    pub defense_scores: Vec<DefenseScoreItem>,
     pub timeline: Vec<TimelineIssue>,
     pub suggestions: Vec<String>,
     pub model_confidence: Option<f64>,
@@ -228,6 +238,8 @@ pub struct SubmitAnswerRequest {
     pub session_id: String,
     pub answer_text: String,
     pub parent_answer_id: Option<String>,
+    #[serde(default)]
+    pub elapsed_seconds: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

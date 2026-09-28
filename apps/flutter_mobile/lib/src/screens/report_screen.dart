@@ -60,6 +60,13 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
             _OverallScore(score: report.overallScore),
             const SizedBox(height: 12),
             _SummaryBand(report: report),
+            if (report.defenseScores.isNotEmpty) ...[
+              const SizedBox(height: 28),
+              const SectionLabel('答辩评分'),
+              const SizedBox(height: 8),
+              for (final item in report.defenseScores)
+                _DefenseScoreRow(item: item),
+            ],
             if (report.audioWaveform.isNotEmpty) ...[
               const SizedBox(height: 26),
               const SectionLabel('声音波形与停顿'),
@@ -67,7 +74,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               _AudioWaveform(points: report.audioWaveform),
             ],
             const SizedBox(height: 28),
-            const SectionLabel('五维分析'),
+            const SectionLabel('陈述与画面分析'),
             const SizedBox(height: 8),
             ScoreRow(
               label: '内容',
@@ -115,7 +122,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               ],
             ],
             const SizedBox(height: 26),
-            const SectionLabel('下一次练习'),
+            const SectionLabel('重点改进'),
             const SizedBox(height: 12),
             if (report.suggestions.isEmpty)
               const Text('暂无额外建议。', style: TextStyle(color: AppColors.muted))
@@ -154,37 +161,107 @@ class _OverallScore extends StatelessWidget {
   final int? score;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-    decoration: BoxDecoration(
-      color: AppColors.white,
-      border: Border.all(color: AppColors.line),
-      borderRadius: BorderRadius.circular(7),
-    ),
-    child: Row(
-      children: [
-        const Icon(
-          Icons.workspace_premium_outlined,
-          color: AppColors.vermilion,
-        ),
-        const SizedBox(width: 12),
-        const Expanded(
-          child: Text(
-            '本次综合表现',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-        ),
-        Text(
-          score == null ? '—' : '$score',
-          style: const TextStyle(
-            fontFamily: 'Songti SC',
-            fontSize: 34,
-            fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final value = score;
+    final grade = value == null
+        ? '未评分'
+        : value >= 90
+        ? '优秀'
+        : value >= 80
+        ? '良好'
+        : value >= 70
+        ? '中等'
+        : value >= 60
+        ? '及格'
+        : '不及格';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        border: Border.all(color: AppColors.line),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.workspace_premium_outlined,
             color: AppColors.vermilion,
           ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '答辩最终评分',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(grade, style: const TextStyle(color: AppColors.muted)),
+              ],
+            ),
+          ),
+          Text(
+            score == null ? '—' : '$score',
+            style: const TextStyle(
+              fontFamily: 'Songti SC',
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+              color: AppColors.vermilion,
+            ),
+          ),
+          if (score != null)
+            const Text(' / 100', style: TextStyle(color: AppColors.muted)),
+        ],
+      ),
+    );
+  }
+}
+
+class _DefenseScoreRow extends StatelessWidget {
+  const _DefenseScoreRow({required this.item});
+
+  final DefenseScoreItem item;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 11),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 98,
+          child: Text(
+            item.label,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
         ),
-        if (score != null)
-          const Text(' / 100', style: TextStyle(color: AppColors.muted)),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: item.score / item.maxScore.clamp(1, 100),
+                  minHeight: 7,
+                  color: AppColors.jade,
+                  backgroundColor: AppColors.line,
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                item.summary,
+                style: const TextStyle(color: AppColors.muted, height: 1.45),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          '${item.score} / ${item.maxScore}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ],
     ),
   );

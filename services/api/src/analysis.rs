@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -16,9 +16,15 @@ use uuid::Uuid;
 use crate::{
     AppState,
     defense::content_system_prompt,
-    entities::{document, document_chunk, jury_answer, rehearsal_session, report, session_metric},
+    entities::{
+        document, document_chunk, jury_answer, jury_question, rehearsal_session, report,
+        session_metric,
+    },
     error::{ApiError, ApiResult},
-    models::{AudioWavePoint, DimensionReport, EvidenceRef, ReportPayload, TimelineIssue},
+    models::{
+        AudioWavePoint, DefenseScoreItem, DimensionReport, EvidenceRef, ReportPayload,
+        TimelineIssue,
+    },
 };
 
 pub async fn ingest_document(state: &AppState, document_id: &str) -> ApiResult<()> {
@@ -477,6 +483,128 @@ fn score_label(score: Option<i32>) -> String {
     score.map_or_else(|| "暂无数据".into(), |value| format!("{value}分"))
 }
 
+fn defense_score_items(
+    answers: &[jury_answer::Model],
+    questions: &[jury_question::Model],
+    content_score: i32,
+    delivery_score: i32,
+) -> Vec<DefenseScoreItem> {
+    let categories = questions
+        .iter()
+        .map(|question| (question.id.as_str(), question.category.as_str()))
+        .collect::<HashMap<_, _>>();
+    let overall = average_answer_scores(answers, None).unwrap_or(0);
+    let familiarity =
+        average_bounded_evaluation_score(answers, "familiarity_score").unwrap_or(overall);
+    let completeness =
+        average_bounded_evaluation_score(answers, "completeness_score").unwrap_or(overall);
+    let adaptability =
+        average_bounded_evaluation_score(answers, "adaptability_score").unwrap_or(overall);
+    let expression =
+        average_bounded_evaluation_score(answers, "expression_score").unwrap_or(overall);
+    let technical = average_answer_scores(
+        answers,
+        Some((&categories, &["技术架构", "核心实现", "数据与验证"])),
+    )
+    .unwrap_or(overall);
+    let innovation =
+        average_answer_scores(answers, Some((&categories, &["创新与对照", "风险与边界"])))
+            .unwrap_or(overall);
+    let value = average_answer_scores(
+        answers,
+        Some((&categories, &["背景与需求", "用户与场景", "成本与落地"])),
+    )
+    .unwrap_or(overall);
+
+    let item = |label: &str, maximum: i32, normalized: i32, focus: &str| DefenseScoreItem {
+        label: label.to_owned(),
+        score: ((normalized.clamp(0, 100) as f64 * maximum as f64 / 100.0).round() as i32)
+            .clamp(0, maximum),
+        max_score: maximum,
+        summary: if answers.is_empty() {
+            "本次没有完成有效问答，无法证明这一项能力。".into()
+        } else if normalized >= 80 {
+            format!("回答能够具体说明{focus}，并与项目材料保持较好一致。")
+        } else if normalized >= 60 {
+            format!("能够说明{focus}，但部分实现依据、数据或边界仍不完整。")
+        } else {
+            format!("对{focus}的回答缺少可核验细节，存在跑题、遗漏或无依据说法。")
+        },
+    };
+
+    vec![
+        item("项目理解", 15, familiarity, "项目目标、流程和关键决策"),
+        item("技术能力", 20, technical, "核心实现、数据流和异常处理"),
+        item(
+            "技术原理理解",
+            15,
+            technical.min(familiarity),
+            "技术原理、选型理由和方案权衡",
+        ),
+        item("项目创新", 10, innovation, "创新差异和可复现对照"),
+        item("项目价值", 10, value, "用户需求、调研结果和实际价值"),
+        item(
+            "项目完整性",
+            10,
+            ((completeness + content_score) / 2).clamp(0, 100),
+            "已完成功能、验证结果和适用边界",
+        ),
+        item(
+            "问题分析能力",
+            10,
+            adaptability,
+            "问题中的关键矛盾和限制条件",
+        ),
+        item(
+            "临场应答能力",
+            5,
+            adaptability.min(overall),
+            "现场追问和未知问题",
+        ),
+        item(
+            "表达与逻辑",
+            5,
+            ((expression + delivery_score) / 2).clamp(0, 100),
+            "回答相关性、结构和口头表达",
+        ),
+    ]
+}
+
+fn average_bounded_evaluation_score(answers: &[jury_answer::Model], key: &str) -> Option<i32> {
+    let scores = answers
+        .iter()
+        .filter_map(|answer| {
+            let raw = answer.evaluation_json.get(key)?.as_i64()?;
+            let calibrated = answer
+                .evaluation_json
+                .get("score")
+                .and_then(Value::as_i64)
+                .unwrap_or(raw);
+            Some(raw.min(calibrated).clamp(0, 100) as i32)
+        })
+        .collect::<Vec<_>>();
+    average_i32(&scores)
+}
+
+fn average_answer_scores(
+    answers: &[jury_answer::Model],
+    category_filter: Option<(&HashMap<&str, &str>, &[&str])>,
+) -> Option<i32> {
+    let scores = answers
+        .iter()
+        .filter(|answer| {
+            category_filter.is_none_or(|(categories, accepted)| {
+                categories
+                    .get(answer.question_id.as_str())
+                    .is_some_and(|category| accepted.contains(category))
+            })
+        })
+        .filter_map(|answer| answer.evaluation_json.get("score")?.as_i64())
+        .map(|score| score.clamp(0, 100) as i32)
+        .collect::<Vec<_>>();
+    average_i32(&scores)
+}
+
 pub async fn refresh_report_qa(state: &AppState, session_id: &str) -> ApiResult<()> {
     let Some(model) = report::Entity::find()
         .filter(report::Column::SessionId.eq(session_id))
@@ -487,13 +615,15 @@ pub async fn refresh_report_qa(state: &AppState, session_id: &str) -> ApiResult<
     };
     let mut payload: ReportPayload = serde_json::from_value(model.report_json.clone())?;
     payload.qa = qa_dimension(state, session_id).await?;
-    payload.overall_score = weighted_overall_score([
-        (payload.content.score, 0.30),
-        (payload.delivery.score, 0.20),
-        (payload.timing.score, 0.10),
-        (payload.visual.score, 0.15),
-        (payload.qa.score, 0.25),
-    ]);
+    if payload.defense_scores.is_empty() {
+        payload.overall_score = weighted_overall_score([
+            (payload.content.score, 0.30),
+            (payload.delivery.score, 0.20),
+            (payload.timing.score, 0.10),
+            (payload.visual.score, 0.15),
+            (payload.qa.score, 0.25),
+        ]);
+    }
     let mut active: report::ActiveModel = model.into();
     active.report_json = Set(serde_json::to_value(payload)?);
     active.update(&state.db).await?;
@@ -670,6 +800,11 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         .order_by_asc(jury_answer::Column::CreatedAt)
         .all(&state.db)
         .await?;
+    let questions = jury_question::Entity::find()
+        .filter(jury_question::Column::SessionId.eq(session_id))
+        .order_by_asc(jury_question::Column::CreatedAt)
+        .all(&state.db)
+        .await?;
     for answer in &answers {
         suggestions.extend(answer_improvement_suggestions(&answer.evaluation_json));
     }
@@ -690,13 +825,8 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         },
         evidence: Vec::new(),
     };
-    let overall_score = weighted_overall_score([
-        (content.score, 0.30),
-        (Some(delivery_score), 0.20),
-        (Some(timing_score), 0.10),
-        (visual.score, 0.15),
-        (qa.score, 0.25),
-    ]);
+    let defense_scores = defense_score_items(&answers, &questions, content_score, delivery_score);
+    let overall_score = Some(defense_scores.iter().map(|item| item.score).sum());
 
     let payload = ReportPayload {
         session_id: session.id.clone(),
@@ -729,6 +859,7 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         },
         visual,
         qa,
+        defense_scores,
         timeline,
         suggestions,
         model_confidence: content_json.get("confidence").and_then(Value::as_f64),
@@ -767,13 +898,38 @@ fn material_context(chunks: &[document_chunk::Model]) -> String {
         .map(|chunk| {
             let units = evidence_units(&chunk.content)
                 .into_iter()
+                .filter(|unit| is_project_evidence_unit(unit))
                 .map(|unit| format!("    - {unit}"))
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("[{}]\n{}", chunk.id, units)
         })
+        .filter(|chunk| !chunk.trim_end().ends_with(']'))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn is_project_evidence_unit(unit: &str) -> bool {
+    let normalized = unit.trim().to_lowercase();
+    ![
+        "每个关键问题应当",
+        "只返回json",
+        "你是一名",
+        "答辩官",
+        "问题必须",
+        "提问不得",
+        "不得把",
+        "禁止",
+        "回答评价必须",
+        "答辩规则",
+        "评委应当",
+        "评分标准",
+        "score_band",
+        "chunk_id",
+        "follow_up",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
 }
 
 fn evidence_units(content: &str) -> Vec<String> {
@@ -810,7 +966,7 @@ fn best_evidence_quote(
         .flat_map(|chunk| {
             evidence_units(&chunk.content)
                 .into_iter()
-                .filter(|unit| unit.chars().count() >= 8)
+                .filter(|unit| unit.chars().count() >= 8 && is_project_evidence_unit(unit))
                 .map(|quote| (chunk.id.clone(), quote))
                 .collect::<Vec<_>>()
         })

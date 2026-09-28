@@ -138,28 +138,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           : () => setState(() => _register = !_register),
                       child: Text(_register ? '已有账号，直接登录' : '第一次使用，创建账号'),
                     ),
-                    const SizedBox(height: 34),
-                    const Divider(),
-                    const SizedBox(height: 18),
-                    const Row(
-                      children: [
-                        Icon(
-                          Icons.shield_outlined,
-                          size: 18,
-                          color: AppColors.jade,
-                        ),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '训练视频默认只保存在本机，服务端仅处理必要音频与结构化指标。',
-                            style: TextStyle(
-                              color: AppColors.muted,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),

@@ -688,43 +688,41 @@ async fn generate_questions(
     } else {
         String::new()
     };
-    if let Some(ref session_id) = body.session_id {
-        let existing = jury_question::Entity::find()
+    let mut existing = if let Some(ref session_id) = body.session_id {
+        jury_question::Entity::find()
             .filter(jury_question::Column::ProjectId.eq(&project_id))
             .filter(jury_question::Column::SessionId.eq(session_id))
             .order_by_asc(jury_question::Column::CreatedAt)
             .all(&state.db)
+            .await?
+    } else {
+        Vec::new()
+    };
+    if let Some(ref session_id) = body.session_id
+        && body.regenerate
+        && !existing.is_empty()
+    {
+        jury_question::Entity::delete_many()
+            .filter(jury_question::Column::ProjectId.eq(&project_id))
+            .filter(jury_question::Column::SessionId.eq(session_id))
+            .exec(&state.db)
             .await?;
-        if existing.len() >= count && !body.regenerate {
-            return existing
-                .into_iter()
-                .take(count)
-                .map(question_response)
-                .collect::<ApiResult<Vec<_>>>()
-                .map(Json);
-        }
-        if body.regenerate && !existing.is_empty() {
-            jury_question::Entity::delete_many()
-                .filter(jury_question::Column::ProjectId.eq(&project_id))
-                .filter(jury_question::Column::SessionId.eq(session_id))
-                .exec(&state.db)
-                .await?;
-        }
+        existing.clear();
+    }
+    if existing.len() >= count {
+        return existing
+            .into_iter()
+            .take(count)
+            .map(question_response)
+            .collect::<ApiResult<Vec<_>>>()
+            .map(Json);
     }
     let previous_models = jury_question::Entity::find()
         .filter(jury_question::Column::ProjectId.eq(&project_id))
         .order_by_desc(jury_question::Column::CreatedAt)
         .all(&state.db)
         .await?;
-    let previous_models = previous_models
-        .into_iter()
-        .filter(|item| {
-            body.session_id
-                .as_ref()
-                .is_none_or(|session_id| item.session_id.as_deref() != Some(session_id.as_str()))
-        })
-        .take(30)
-        .collect::<Vec<_>>();
+    let previous_models = previous_models.into_iter().take(30).collect::<Vec<_>>();
     let previous_questions = previous_models
         .iter()
         .map(|item| item.question.clone())
@@ -736,10 +734,32 @@ async fn generate_questions(
                 .unwrap_or_default()
         })
         .collect::<Vec<_>>();
+    let answer_history = if let Some(ref session_id) = body.session_id {
+        jury_answer::Entity::find()
+            .filter(jury_answer::Column::SessionId.eq(session_id))
+            .order_by_asc(jury_answer::Column::CreatedAt)
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|answer| {
+                let asked = answer
+                    .evaluation_json
+                    .get("asked_question")
+                    .and_then(Value::as_str)
+                    .unwrap_or("评委问题");
+                format!("评委：{asked}\n答辩者：{}", answer.answer_text)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    };
     let chunks = retrieve_chunks(
         &state,
         &project_id,
-        &format!("项目背景 技术方案 创新点 实验结果 局限性 风险 {presentation}"),
+        &format!(
+            "项目背景 用户需求 调研 技术方案 选择理由 实验验证 创新对照 局限性 风险 {presentation} {answer_history}"
+        ),
         12,
     )
     .await?;
@@ -750,14 +770,34 @@ async fn generate_questions(
     }
     let material = material_context(&chunks);
     let category_plan = question_category_plan(count);
-    let mut candidates = Vec::with_capacity(count);
+    let existing_questions = existing
+        .iter()
+        .map(|item| item.question.clone())
+        .collect::<HashSet<_>>();
+    let mut candidates = existing
+        .iter()
+        .filter_map(|item| {
+            serde_json::from_value::<Vec<EvidenceRef>>(item.evidence_json.clone())
+                .ok()
+                .map(|evidence| QuestionCandidate {
+                    category: item.category.clone(),
+                    question: item.question.clone(),
+                    evidence,
+                })
+        })
+        .collect::<Vec<_>>();
     for _ in 0..QUESTION_GENERATION_MAX_ATTEMPTS {
         let missing = missing_question_categories(&category_plan, &candidates);
         if missing.is_empty() {
             break;
         }
-        let prompt =
-            question_generation_prompt(&material, &presentation, &missing, &previous_questions);
+        let prompt = question_generation_prompt(
+            &material,
+            &presentation,
+            &answer_history,
+            &missing,
+            &previous_questions,
+        );
         let value = match state
             .ai
             .chat_json_fast(&question_system_prompt(), &prompt)
@@ -795,8 +835,18 @@ async fn generate_questions(
     }
 
     let transaction = state.db.begin().await?;
-    let mut responses = Vec::with_capacity(count);
-    for candidate in candidates {
+    let mut responses = existing
+        .into_iter()
+        .take(count)
+        .map(question_response)
+        .collect::<ApiResult<Vec<_>>>()?;
+    for candidate in candidates
+        .into_iter()
+        .filter(|candidate| !existing_questions.contains(&candidate.question))
+    {
+        if responses.len() >= count {
+            break;
+        }
         let model = jury_question::ActiveModel {
             id: Set(Uuid::new_v4().to_string()),
             project_id: Set(project_id.clone()),
@@ -814,7 +864,16 @@ async fn generate_questions(
     Ok(Json(responses))
 }
 
-const CORE_QUESTION_CATEGORIES: [&str; 5] = ["技术", "应用", "创新", "风险", "质疑"];
+const CORE_QUESTION_CATEGORIES: [&str; 8] = [
+    "背景与需求",
+    "用户与场景",
+    "技术架构",
+    "核心实现",
+    "数据与验证",
+    "创新与对照",
+    "风险与边界",
+    "成本与落地",
+];
 const QUESTION_GENERATION_MAX_ATTEMPTS: usize = 3;
 
 #[derive(Debug)]
@@ -856,6 +915,7 @@ fn missing_question_categories<'a>(
 fn question_generation_prompt(
     material: &str,
     presentation: &str,
+    answer_history: &str,
     missing: &[&str],
     previous_questions: &[String],
 ) -> String {
@@ -863,6 +923,11 @@ fn question_generation_prompt(
         "（没有可用的现场陈述转写）"
     } else {
         presentation
+    };
+    let answer_history = if answer_history.trim().is_empty() {
+        "（尚未开始问答）"
+    } else {
+        answer_history
     };
     let previous = if previous_questions.is_empty() {
         "（没有历史问题）".to_owned()
@@ -876,7 +941,7 @@ fn question_generation_prompt(
             .join("\n")
     };
     format!(
-        "结合项目材料和学生现场陈述，为以下类别各生成一个真实评委会追问：{}。先判断每个类别对应的具体事实和缺口，再提问；不要按固定顺序重复同一事实，也不要改写历史问题。问题必须能用项目材料或现场演示回答，不能只问愿景。优先核查输入/输出、技术取舍、验证数据、目标用户、失败边界、创新对照和实际完成度。每个问题只问一件事，80字以内，question只写问题本身；不得使用‘请介绍项目’‘有什么创新’等空泛句式，不得把材料片段开头直接塞进引号。每个问题的category必须逐字使用对应类别；evidence至少包含一项完整语义单元；chunk_id必须复制材料方括号中的编号；quote必须是对应材料中的连续原文，优先完整句，不得改写或截断。只返回JSON：{{\"questions\":[{{\"category\":\"技术\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"完整材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n历史问题（本次必须换事实或换缺口）：\n{previous}\n\n现场陈述转写：\n{presentation}\n\n项目材料：\n{material}",
+        "现在需要为以下尚未覆盖的维度各生成一个真实评委问题：{}。先综合现场陈述和已经进行的问答，选择该维度中最值得核查的具体决策或缺口。问题必须能让答辩者解释为什么这样做、具体如何实现、如何验证或替代方案为何未选；每题只问一个核心问题，80字以内。question只写评委会真正说出口的话，不得复述规则，不得引用整段材料，不得出现‘每个关键问题’‘评分’‘建议’等元话语。category必须逐字使用指定维度。evidence至少一项，chunk_id复制方括号编号，quote复制对应材料中的连续完整原文。只返回JSON：{{\"questions\":[{{\"category\":\"背景与需求\",\"question\":\"...\",\"evidence\":[{{\"chunk_id\":\"...\",\"quote\":\"完整材料原文\"}}]}}]}}。questions数组必须恰好包含{}项。\n\n已经问过的问题（不得换句式重复）：\n{previous}\n\n已经进行的问答：\n{answer_history}\n\n现场陈述转写：\n{presentation}\n\n项目材料：\n{material}",
         missing.join("、"),
         missing.len(),
     )
@@ -888,13 +953,38 @@ fn material_context(chunks: &[crate::entities::document_chunk::Model]) -> String
         .map(|chunk| {
             let units = evidence_units(&chunk.content)
                 .into_iter()
+                .filter(|unit| is_project_evidence_unit(unit))
                 .map(|unit| format!("    - {unit}"))
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("[{id}]\n{units}", id = chunk.id)
         })
+        .filter(|chunk| !chunk.trim_end().ends_with(']'))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn is_project_evidence_unit(unit: &str) -> bool {
+    let normalized = unit.trim().to_lowercase();
+    ![
+        "每个关键问题应当",
+        "只返回json",
+        "你是一名",
+        "答辩官",
+        "问题必须",
+        "提问不得",
+        "不得把",
+        "禁止",
+        "回答评价必须",
+        "答辩规则",
+        "评委应当",
+        "评分标准",
+        "score_band",
+        "chunk_id",
+        "follow_up",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
 }
 
 fn evidence_units(content: &str) -> Vec<String> {
@@ -939,7 +1029,7 @@ fn best_evidence_quote_excluding(
         .flat_map(|chunk| {
             evidence_units(&chunk.content)
                 .into_iter()
-                .filter(|unit| unit.chars().count() >= 8)
+                .filter(|unit| unit.chars().count() >= 8 && is_project_evidence_unit(unit))
                 .map(|quote| (chunk.id.clone(), quote))
                 .collect::<Vec<_>>()
         })
@@ -971,57 +1061,6 @@ fn best_evidence_quote_excluding(
         chunk_id: chunk_id.clone(),
         quote: quote.clone(),
     })
-}
-
-fn evidence_anchor(quote: &str) -> String {
-    let clauses = quote
-        .split(['。', '！', '？', '!', '?', ';', '；', '\n', '，', ','])
-        .map(str::trim)
-        .map(|part| part.trim_matches(['"', '“', '”', '「', '」']))
-        .filter(|part| part.chars().count() >= 6)
-        .collect::<Vec<_>>();
-    let mut anchor = clauses
-        .iter()
-        .filter(|part| {
-            [
-                "采用",
-                "使用",
-                "后端",
-                "知识库",
-                "评委",
-                "端侧",
-                "视频",
-                "用户",
-                "输入",
-                "输出",
-                "验证",
-            ]
-            .iter()
-            .any(|keyword| part.contains(keyword))
-        })
-        .max_by_key(|part| part.chars().count())
-        .copied()
-        .or_else(|| {
-            clauses
-                .iter()
-                .max_by_key(|part| part.chars().count())
-                .copied()
-        })
-        .unwrap_or(quote.trim());
-    for prefix in ["SpeechMirror", "系统", "项目", "本项目"] {
-        if let Some(stripped) = anchor.strip_prefix(prefix) {
-            anchor = stripped.trim_start_matches(['使', '用', '采', '用', '先']);
-        }
-    }
-    let mut shortened = anchor.chars().take(32).collect::<String>();
-    if anchor.chars().count() > 32 {
-        shortened.push('…');
-    }
-    if shortened.chars().count() < 6 {
-        quote.chars().take(32).collect()
-    } else {
-        shortened
-    }
 }
 
 fn pair_overlap_count(left: &str, right: &str) -> usize {
@@ -1075,22 +1114,64 @@ fn fill_fallback_question_candidates_with_history(
             best_evidence_quote_excluding(chunks, category, offset + index, &used_evidence)
                 .or_else(|| best_evidence_quote(chunks, category, offset + index));
         let Some(evidence) = evidence else { continue };
-        let anchor = evidence_anchor(&evidence.quote);
         let variant = (offset + index) % 2;
         let question = match (category, variant) {
-            ("技术", 0) => format!("“{anchor}”的输入、处理和输出分别是什么？"),
-            ("技术", _) => {
-                format!("采用“{anchor}”的理由是什么，替代方案为何未选？")
+            ("背景与需求", 0) => {
+                "你们做过哪些用户调研？请说明样本、主要结果，以及结果具体改变了哪项产品设计。"
+                    .to_owned()
             }
-            ("应用", 0) => format!("“{anchor}”给目标用户带来什么可观察价值，如何验证？"),
-            ("应用", _) => format!("“{anchor}”在真实使用场景的哪一步发挥作用？"),
-            ("创新", 0) => format!("“{anchor}”相对常见方案的具体差异是什么？"),
-            ("创新", _) => format!("“{anchor}”的创新依据是什么，有什么可复现对照？"),
-            ("风险", 0) => format!("“{anchor}”在哪种条件下会失效，验证结果是什么？"),
-            ("风险", _) => format!("“{anchor}”的关键依赖不可用时，系统如何降级？"),
-            ("质疑", 0) => format!("“{anchor}”的适用边界是什么？"),
-            ("质疑", _) => format!("评委如何复核“{anchor}”，对应证据是什么？"),
-            _ => format!("围绕“{anchor}”，请给出一个可核验的实现或结果。"),
+            ("背景与需求", _) => {
+                "这个项目最先要解决的真实问题是什么？现有方案为什么不能满足目标用户？".to_owned()
+            }
+            ("用户与场景", 0) => {
+                "请用一个真实使用场景说明用户从开始操作到获得结果的完整流程，最关键的一步是什么？"
+                    .to_owned()
+            }
+            ("用户与场景", _) => {
+                "你们如何确认目标用户会持续使用这项功能，而不只是偶尔尝试一次？".to_owned()
+            }
+            ("技术架构", 0) => {
+                "请从客户端的一次操作开始，说明数据经过哪些模块、如何通信，最终怎样返回结果。"
+                    .to_owned()
+            }
+            ("技术架构", _) => {
+                "当前架构中最关键的技术选型是什么？为什么没有采用你们比较过的替代方案？".to_owned()
+            }
+            ("核心实现", 0) => {
+                "请选择项目最核心的一项能力，具体说明它的输入、处理步骤和输出。".to_owned()
+            }
+            ("核心实现", _) => {
+                "这个核心模块是如何实现的？请说清关键数据结构、异常处理和失败后的降级方式。"
+                    .to_owned()
+            }
+            ("数据与验证", 0) => {
+                "你们声称的效果是怎样测出来的？请说明测试条件、对照基准、评价指标和实际结果。"
+                    .to_owned()
+            }
+            ("数据与验证", _) => {
+                "现有测试最能证明项目有效的一组数据是什么？这组数据有什么尚未覆盖的边界？"
+                    .to_owned()
+            }
+            ("创新与对照", 0) => {
+                "与现有同类方案相比，你们最关键的差异是什么？有没有可复现的对照结果？".to_owned()
+            }
+            ("创新与对照", _) => {
+                "如果去掉项目中的人工智能能力，哪些核心价值仍然成立，哪些会直接消失？".to_owned()
+            }
+            ("风险与边界", 0) => {
+                "当前方案在哪种真实条件下最容易失败？系统如何识别并处理这种情况？".to_owned()
+            }
+            ("风险与边界", _) => {
+                "当关键外部服务不可用或返回错误结果时，系统如何降级并避免误导用户？".to_owned()
+            }
+            ("成本与落地", 0) => {
+                "如果用户量扩大一百倍，最先出现的成本或性能瓶颈是什么？你们准备如何处理？"
+                    .to_owned()
+            }
+            ("成本与落地", _) => {
+                "项目实际部署后的单次使用成本如何估算？目前最影响落地的限制是什么？".to_owned()
+            }
+            _ => "请说明这个方案的选择理由、实际实现和可核验结果。".to_owned(),
         };
         if !candidate_is_novel(
             &question,
@@ -1264,6 +1345,37 @@ async fn submit_answer(
     if body.answer_text.trim().is_empty() {
         return Err(ApiError::BadRequest("answer cannot be empty".into()));
     }
+    let session_answers = jury_answer::Entity::find()
+        .filter(jury_answer::Column::SessionId.eq(&body.session_id))
+        .order_by_asc(jury_answer::Column::CreatedAt)
+        .all(&state.db)
+        .await?;
+    let mut answered_question_ids = session_answers
+        .iter()
+        .map(|answer| answer.question_id.as_str())
+        .collect::<HashSet<_>>();
+    answered_question_ids.insert(question.id.as_str());
+    let main_question_count = answered_question_ids.len();
+    let answer_turn_count = session_answers.len() + 1;
+    let follow_up_depth = session_answers
+        .iter()
+        .filter(|answer| answer.question_id == question.id)
+        .count();
+    let history = session_answers
+        .iter()
+        .rev()
+        .take(12)
+        .rev()
+        .map(|answer| {
+            let asked = answer
+                .evaluation_json
+                .get("asked_question")
+                .and_then(Value::as_str)
+                .unwrap_or("评委问题");
+            format!("评委：{asked}\n答辩者：{}", answer.answer_text)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let (asked_question, previous_turn) = if let Some(parent_answer_id) =
         body.parent_answer_id.as_deref()
     {
@@ -1302,9 +1414,25 @@ async fn submit_answer(
     )
     .await?;
     let material = material_context(&chunks);
+    let elapsed_seconds = body.elapsed_seconds.unwrap_or_default().max(0);
+    let target_seconds = session.target_seconds.max(1);
     let prompt = format!(
-        "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n项目材料：\n{}\n只返回JSON，字段为score(0-100整数)、score_band、expression_score(0-100整数)、adaptability_score(0-100整数)、familiarity_score(0-100整数)、completeness_score(0-100整数)、relevance、accuracy、question_target、expected_points数组、covered_points数组、missing_points数组、unsupported_claims数组、evidence数组、suggestions数组、follow_up。先判断是否回答本轮问题，再核对材料事实。完全跑题、胡编或没有覆盖要点时不超过30分；回答没有材料依据时不超过45分；只有明确回答问题、引用具体方案或数据并说明边界时才能超过70分。evidence每项必须含chunk_id和对应材料中的连续完整quote。suggestions必须至少给出3条，每条指出一个missing_points或unsupported_claims中的具体缺口，并写出下一次可直接补充的内容；禁止‘继续努力’‘补充材料’‘表达更清楚’等空话。首轮存在关键缺口、矛盾或不确定时只给一个承接缺口的简短follow_up，第二轮follow_up必须为null。",
-        question.question, previous_turn, asked_question, body.answer_text, material
+        "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n\n本场已完成主问题数：{}\n本场回答轮数：{}\n当前问题已追问深度：{}\n答辩者累计回答用时：{}秒\n目标答辩时长：{}秒\n\n历史问答：\n{}\n\n项目材料：\n{}\n\n只返回JSON，字段为score(0-100整数)、score_band、expression_score(0-100整数)、adaptability_score(0-100整数)、familiarity_score(0-100整数)、completeness_score(0-100整数)、relevance、accuracy、question_target、expected_points数组、covered_points数组、missing_points数组、unsupported_claims数组、evidence数组、suggestions数组、decision、follow_up。decision只能是follow_up、next_question或end_defense。先判断是否回答本轮问题，再核对材料事实。完全跑题、胡编或没有覆盖要点时不超过30分；明确表示不知道或不会时不超过15分且decision必须为next_question；回答没有材料依据时不超过45分；只有明确回答问题、引用具体方案或数据并说明边界时才能超过70分。evidence每项必须含chunk_id和对应材料中的连续完整quote。suggestions至少给出3条具体改进，只供最终报告使用。需要继续核查当前回答的一个关键漏洞时才选择follow_up，并给出一个承接回答的简短具体问题；否则换题。相关核心维度已充分覆盖且继续提问价值很低时选择end_defense。",
+        question.question,
+        previous_turn,
+        asked_question,
+        body.answer_text,
+        main_question_count,
+        answer_turn_count,
+        follow_up_depth,
+        elapsed_seconds,
+        target_seconds,
+        if history.is_empty() {
+            "（这是第一轮问答）"
+        } else {
+            &history
+        },
+        material
     );
     let mut evaluation = match state
         .ai
@@ -1352,13 +1480,7 @@ async fn submit_answer(
             .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
         evaluation_object.insert("evidence".into(), serde_json::to_value(&evidence)?);
     }
-    enrich_answer_feedback(
-        &mut evaluation,
-        &asked_question,
-        &body.answer_text,
-        &evidence,
-        body.parent_answer_id.is_none(),
-    );
+    enrich_answer_feedback(&mut evaluation, &asked_question, &evidence);
     let raw_score = evaluation
         .as_object()
         .and_then(|object| object.get("score"))
@@ -1376,11 +1498,18 @@ async fn submit_answer(
         .as_object_mut()
         .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
     evaluation_object.insert("score".into(), json!(score));
-    let follow_up = normalized_follow_up(&evaluation);
+    normalize_defense_decision(
+        &mut evaluation,
+        &body.answer_text,
+        main_question_count,
+        answer_turn_count,
+        follow_up_depth,
+        elapsed_seconds,
+        target_seconds,
+    )?;
     let evaluation_object = evaluation
         .as_object_mut()
         .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
-    evaluation_object.insert("follow_up".into(), json!(follow_up));
     evaluation_object.insert("asked_question".into(), json!(&asked_question));
     evaluation_object.insert(
         "parent_answer_id".into(),
@@ -1413,7 +1542,7 @@ fn fallback_answer_evaluation(
     asked_question: &str,
     answer_text: &str,
     chunks: &[crate::entities::document_chunk::Model],
-    allow_follow_up: bool,
+    _allow_follow_up: bool,
 ) -> Value {
     let answer_length = answer_text
         .chars()
@@ -1454,11 +1583,6 @@ fn fallback_answer_evaluation(
     } else {
         json!([])
     };
-    let follow_up = if allow_follow_up {
-        format!("请不要泛泛描述，直接说明“{evidence_text}”对应的一个实现步骤或验证结果。")
-    } else {
-        String::new()
-    };
     json!({
         "score": score,
         "score_band": "严重不足",
@@ -1479,25 +1603,13 @@ fn fallback_answer_evaluation(
             format!("补充“{evidence_text}”对应的一个可核验结果、测试条件或用户场景。"),
             "最后说明当前方案的一个限制，避免把尚未验证的设想说成已完成。"
         ],
-        "follow_up": if follow_up.is_empty() { Value::Null } else { Value::String(follow_up) },
+        "decision": "next_question",
+        "follow_up": Value::Null,
         "evaluation_source": "material_recovery"
     })
 }
 
-fn enrich_answer_feedback(
-    evaluation: &mut Value,
-    asked_question: &str,
-    answer_text: &str,
-    evidence: &[EvidenceRef],
-    allow_follow_up: bool,
-) {
-    let answer_length = answer_text
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .count();
-    let needs_follow_up = allow_follow_up
-        && (answer_length < 80 || material_overlap_count(answer_text, evidence) == 0)
-        && normalized_follow_up(evaluation).is_none();
+fn enrich_answer_feedback(evaluation: &mut Value, asked_question: &str, evidence: &[EvidenceRef]) {
     let Some(object) = evaluation.as_object_mut() else {
         return;
     };
@@ -1547,14 +1659,6 @@ fn enrich_answer_feedback(
             "未给出足以复核的实现、结果或边界。"
         ])
     });
-    if needs_follow_up {
-        object.insert(
-            "follow_up".into(),
-            json!(format!(
-                "请直接补充“{evidence_excerpt}”对应的一个实现步骤或验证结果，不要重复原问题。"
-            )),
-        );
-    }
 }
 
 fn calibrate_answer_score(
@@ -1564,6 +1668,9 @@ fn calibrate_answer_score(
     evidence: &[EvidenceRef],
     evaluation: &Value,
 ) -> i64 {
+    if answer_admits_unknown(answer_text) {
+        return raw_score.min(12);
+    }
     let answer_length = answer_text
         .chars()
         .filter(|character| !character.is_whitespace())
@@ -1627,6 +1734,78 @@ fn material_overlap_count(answer_text: &str, evidence: &[EvidenceRef]) -> usize 
 fn normalized_follow_up(evaluation: &Value) -> Option<String> {
     let follow_up = evaluation.get("follow_up")?.as_str()?.trim();
     (!follow_up.is_empty() && follow_up.chars().count() <= 500).then(|| follow_up.to_owned())
+}
+
+fn answer_admits_unknown(answer: &str) -> bool {
+    let compact = answer
+        .chars()
+        .filter(|character| !character.is_whitespace() && !character.is_ascii_punctuation())
+        .collect::<String>();
+    compact.chars().count() <= 60
+        && [
+            "不知道",
+            "不清楚",
+            "不了解",
+            "不会",
+            "没做过",
+            "没有做过",
+            "没有调研",
+            "无法回答",
+            "回答不了",
+            "记不清",
+            "不确定",
+        ]
+        .iter()
+        .any(|marker| compact.contains(marker))
+}
+
+fn normalize_defense_decision(
+    evaluation: &mut Value,
+    answer_text: &str,
+    main_question_count: usize,
+    answer_turn_count: usize,
+    follow_up_depth: usize,
+    elapsed_seconds: i32,
+    target_seconds: i32,
+) -> ApiResult<()> {
+    let requested = evaluation
+        .get("decision")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_");
+    let follow_up = normalized_follow_up(evaluation);
+    let hard_end = main_question_count >= 10
+        || answer_turn_count >= 14
+        || (main_question_count >= 3 && elapsed_seconds >= target_seconds.saturating_mul(3) / 2);
+    let decision = if hard_end {
+        "end_defense"
+    } else if answer_admits_unknown(answer_text) {
+        "next_question"
+    } else if requested == "end_defense" && main_question_count >= 3 {
+        "end_defense"
+    } else if requested == "follow_up" && follow_up.is_some() && follow_up_depth < 2 {
+        "follow_up"
+    } else {
+        "next_question"
+    };
+    let object = evaluation
+        .as_object_mut()
+        .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
+    object.insert("decision".into(), json!(decision));
+    object.insert(
+        "follow_up".into(),
+        if decision == "follow_up" {
+            json!(follow_up)
+        } else {
+            Value::Null
+        },
+    );
+    object.insert("main_question_count".into(), json!(main_question_count));
+    object.insert("answer_turn_count".into(), json!(answer_turn_count));
+    object.insert("elapsed_seconds".into(), json!(elapsed_seconds));
+    Ok(())
 }
 
 async fn get_trends(
@@ -1910,23 +2089,23 @@ mod route_tests {
         let chunks = vec![question_test_chunk()];
         let plan = question_category_plan(5);
         let value = json!({"questions": [
-            {"category":"技术", "question":"系统如何实现端云协同？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
-            {"category":"应用", "question":" ", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频"}]},
-            {"category":"创新", "question":"创新点是什么？", "evidence":[{"chunk_id":"chunk-1", "quote":"不存在的原文"}]},
+            {"category":"背景与需求", "question":"端云协同架构解决了什么需求？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
+            {"category":"用户与场景", "question":" ", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频"}]},
+            {"category":"技术架构", "question":"端云协同如何实现？", "evidence":[{"chunk_id":"chunk-1", "quote":"不存在的原文"}]},
             {"category":"风险类", "question":"有什么风险？", "evidence":[{"chunk_id":"chunk-1", "quote":"手机本地"}]},
-            {"category":"质疑", "question":"为什么不上传视频？", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频只保存在手机本地"}]},
-            {"category":"应用", "question":"系统如何实现端云协同？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+            {"category":"核心实现", "question":"原始视频为什么只保存在手机本地？", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频只保存在手机本地"}]},
+            {"category":"用户与场景", "question":"端云协同架构解决了什么需求？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
         ]});
         let mut candidates = Vec::new();
 
         accept_question_candidates(&value, &chunks, &plan, &mut candidates);
 
         assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0].category, "技术");
-        assert_eq!(candidates[1].category, "质疑");
+        assert_eq!(candidates[0].category, "背景与需求");
+        assert_eq!(candidates[1].category, "核心实现");
         assert_eq!(
             missing_question_categories(&plan, &candidates),
-            vec!["应用", "创新", "风险"]
+            vec!["用户与场景", "技术架构", "数据与验证"]
         );
     }
 
@@ -1935,7 +2114,7 @@ mod route_tests {
         let chunks = vec![question_test_chunk()];
         let plan = question_category_plan(1);
         let value = json!({"questions": [
-            {"category":"技术", "question":"端云协同架构如何落地？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+            {"category":"背景与需求", "question":"端云协同架构如何落地？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
         ]});
         let mut candidates = Vec::new();
         let previous_questions = vec!["端云协同架构如何实现？".to_owned()];
@@ -1965,7 +2144,7 @@ mod route_tests {
         let mut candidates = Vec::new();
 
         fill_fallback_question_candidates_with_history(
-            &["技术"],
+            &["技术架构"],
             &chunks,
             &mut candidates,
             "session-variation",
@@ -2009,14 +2188,14 @@ mod route_tests {
         let chunks = vec![question_test_chunk()];
         let plan = question_category_plan(5);
         let first = json!({"questions": [
-            {"category":"技术", "question":"端云协同架构如何实现？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
-            {"category":"质疑", "question":"原始视频为什么只保存在本地？", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频"}]}
+            {"category":"背景与需求", "question":"端云协同架构解决了什么需求？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
+            {"category":"核心实现", "question":"原始视频为什么只保存在本地？", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频"}]}
         ]});
         let retry = json!({"questions": [
-            {"category":"风险", "question":"手机本地保存的风险如何验证？", "evidence":[{"chunk_id":"chunk-1", "quote":"手机本地"}]},
-            {"category":"创新", "question":"端云协同架构的差异是什么？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
-            {"category":"应用", "question":"原始视频只保存在手机本地对用户有什么影响？", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频只保存在手机本地"}]},
-            {"category":"技术", "question":"端云协同架构不应重复补充？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+            {"category":"数据与验证", "question":"手机本地保存的风险如何验证？", "evidence":[{"chunk_id":"chunk-1", "quote":"手机本地"}]},
+            {"category":"技术架构", "question":"端云协同架构的数据如何流转？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]},
+            {"category":"用户与场景", "question":"原始视频只保存在手机本地对用户有什么影响？", "evidence":[{"chunk_id":"chunk-1", "quote":"原始视频只保存在手机本地"}]},
+            {"category":"背景与需求", "question":"端云协同架构不应重复补充？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
         ]});
         let mut candidates = Vec::new();
 
@@ -2030,7 +2209,7 @@ mod route_tests {
                 .iter()
                 .map(|candidate| candidate.category.as_str())
                 .collect::<Vec<_>>(),
-            CORE_QUESTION_CATEGORIES
+            CORE_QUESTION_CATEGORIES[..5]
         );
         assert!(missing_question_categories(&plan, &ordered).is_empty());
     }
@@ -2040,7 +2219,7 @@ mod route_tests {
         let chunks = vec![question_test_chunk()];
         let plan = question_category_plan(1);
         let value = json!({"questions": [
-            {"category":"技术", "question":"请说明技术方案如何实现、如何验证，以及后续如何扩展？还可以补充哪些细节？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
+            {"category":"背景与需求", "question":"请说明技术方案如何实现、如何验证，以及后续如何扩展？还可以补充哪些细节？", "evidence":[{"chunk_id":"chunk-1", "quote":"端云协同架构"}]}
         ]});
         let mut candidates = Vec::new();
 
@@ -2050,7 +2229,7 @@ mod route_tests {
     }
 
     #[test]
-    fn recovered_answer_feedback_keeps_suggestions_and_follow_up() {
+    fn recovered_answer_feedback_keeps_suggestions_without_inventing_a_follow_up() {
         let value = fallback_answer_evaluation(
             "请说明项目面向的主要用户？",
             "主要面向学生。",
@@ -2063,11 +2242,51 @@ mod route_tests {
                 .as_array()
                 .is_some_and(|items| items.len() >= 2)
         );
-        assert!(normalized_follow_up(&value).is_some());
+        assert!(normalized_follow_up(&value).is_none());
+        assert_eq!(value["decision"], "next_question");
         assert_eq!(
             verified_evidence(value.get("evidence"), &[question_test_chunk()]).len(),
             1
         );
+    }
+
+    #[test]
+    fn unknown_answer_moves_on_without_follow_up() {
+        let mut evaluation = json!({
+            "decision": "follow_up",
+            "follow_up": "请再解释一次。"
+        });
+
+        normalize_defense_decision(&mut evaluation, "这个我不知道。", 2, 3, 0, 80, 300).unwrap();
+
+        assert_eq!(evaluation["decision"], "next_question");
+        assert!(evaluation["follow_up"].is_null());
+    }
+
+    #[test]
+    fn defense_cannot_end_before_three_main_questions() {
+        let mut evaluation = json!({"decision": "end_defense", "follow_up": null});
+        normalize_defense_decision(&mut evaluation, "这是一个具体回答。", 2, 2, 0, 90, 300)
+            .unwrap();
+        assert_eq!(evaluation["decision"], "next_question");
+
+        normalize_defense_decision(&mut evaluation, "这是一个具体回答。", 3, 4, 0, 180, 300)
+            .unwrap();
+        assert_eq!(evaluation["decision"], "next_question");
+        evaluation["decision"] = json!("end_defense");
+        normalize_defense_decision(&mut evaluation, "这是一个具体回答。", 3, 4, 0, 180, 300)
+            .unwrap();
+        assert_eq!(evaluation["decision"], "end_defense");
+    }
+
+    #[test]
+    fn evaluator_instructions_are_not_project_evidence() {
+        assert!(!is_project_evidence_unit(
+            "每个关键问题应当对应材料中的具体事实、数据或技术方案。"
+        ));
+        assert!(is_project_evidence_unit(
+            "系统使用Rust、Axum和SQLite实现后端服务。"
+        ));
     }
 
     #[test]
@@ -2129,6 +2348,7 @@ mod route_tests {
             timing: dimension(Some(90)),
             visual: dimension(None),
             qa: dimension(Some(76)),
+            defense_scores: vec![],
             timeline: vec![],
             suggestions: vec![],
             model_confidence: Some(0.8),
@@ -2160,6 +2380,7 @@ mod route_tests {
             timing: dimension(None),
             visual: dimension(None),
             qa: dimension(None),
+            defense_scores: vec![],
             timeline: vec![],
             suggestions: vec![],
             model_confidence: None,

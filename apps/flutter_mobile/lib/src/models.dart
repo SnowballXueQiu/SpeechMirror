@@ -192,6 +192,7 @@ class RehearsalReport {
     required this.timing,
     required this.visual,
     required this.qa,
+    this.defenseScores = const [],
     required this.suggestions,
     required this.timeline,
     this.modelConfidence,
@@ -209,6 +210,7 @@ class RehearsalReport {
   final DimensionReport timing;
   final DimensionReport visual;
   final DimensionReport qa;
+  final List<DefenseScoreItem> defenseScores;
   final List<String> suggestions;
   final List<Map<String, dynamic>> timeline;
   final double? modelConfidence;
@@ -237,6 +239,11 @@ class RehearsalReport {
       timing: DimensionReport.fromJson(json['timing'] as Map<String, dynamic>),
       visual: DimensionReport.fromJson(json['visual'] as Map<String, dynamic>),
       qa: DimensionReport.fromJson(json['qa'] as Map<String, dynamic>),
+      defenseScores: (json['defense_scores'] as List<dynamic>? ?? const [])
+          .map(
+            (item) => DefenseScoreItem.fromJson(item as Map<String, dynamic>),
+          )
+          .toList(),
       suggestions: (json['suggestions'] as List<dynamic>? ?? const [])
           .cast<String>(),
       timeline: (json['timeline'] as List<dynamic>? ?? const [])
@@ -244,6 +251,28 @@ class RehearsalReport {
       modelConfidence: (json['model_confidence'] as num?)?.toDouble(),
     );
   }
+}
+
+class DefenseScoreItem {
+  const DefenseScoreItem({
+    required this.label,
+    required this.score,
+    required this.maxScore,
+    required this.summary,
+  });
+
+  final String label;
+  final int score;
+  final int maxScore;
+  final String summary;
+
+  factory DefenseScoreItem.fromJson(Map<String, dynamic> json) =>
+      DefenseScoreItem(
+        label: json['label'] as String,
+        score: (json['score'] as num).toInt(),
+        maxScore: (json['max_score'] as num).toInt(),
+        summary: json['summary'] as String,
+      );
 }
 
 class AudioWavePoint {
@@ -307,6 +336,12 @@ class JuryAnswer {
     return value == null || value.isEmpty ? null : value;
   }
 
+  JuryDecision get decision => switch (evaluation['decision']) {
+    'follow_up' when followUp != null => JuryDecision.followUp,
+    'end_defense' => JuryDecision.endDefense,
+    _ => JuryDecision.nextQuestion,
+  };
+
   factory JuryAnswer.fromJson(Map<String, dynamic> json) => JuryAnswer(
     id: json['id'] as String,
     questionId: json['question_id'] as String,
@@ -319,3 +354,5 @@ class JuryAnswer {
     ),
   );
 }
+
+enum JuryDecision { followUp, nextQuestion, endDefense }

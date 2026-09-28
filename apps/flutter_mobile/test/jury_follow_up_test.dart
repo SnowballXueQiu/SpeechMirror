@@ -21,7 +21,7 @@ void main() {
         .setMockMethodCallHandler(ttsChannel, null);
   });
 
-  testWidgets('continues a jury conversation from the previous answer', (
+  testWidgets('automatically follows up and then changes topic', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 1200);
@@ -37,28 +37,24 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    expect(find.text('如何保护原始视频？'), findsOneWidget);
+    await _pumpAsync(tester);
+    expect(find.text('为什么选择端云协同架构？'), findsOneWidget);
+    await tester.tap(find.byTooltip('输入文字回答'));
+    await _pumpAsync(tester);
     await tester.enterText(find.byType(TextField), '原始视频只保存在手机本地。');
     await tester.tap(find.text('提交回答'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    expect(find.text('回答这一项关键追问'), findsOneWidget);
-    await tester.tap(find.text('回答这一项关键追问'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await _pumpAsync(tester);
 
     expect(find.text('如何证明服务端没有原始视频？'), findsOneWidget);
+    expect(find.textContaining('本轮反馈'), findsNothing);
+    await tester.tap(find.byTooltip('输入文字回答'));
+    await _pumpAsync(tester);
     await tester.enterText(find.byType(TextField), '通过服务端存储目录审计。');
     await tester.tap(find.text('提交回答'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await _pumpAsync(tester);
 
-    expect(find.textContaining('90'), findsOneWidget);
-    expect(find.text('结束答辩并生成报告'), findsOneWidget);
+    expect(find.text('你们如何验证目标用户确实需要这项功能？'), findsOneWidget);
+    expect(find.textContaining('/ 03'), findsNothing);
     expect(api.sessionIds, ['session-1', 'session-1']);
     expect(api.parentAnswerIds, [null, 'answer-1']);
     expect(tester.takeException(), isNull);
@@ -84,22 +80,24 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await _pumpAsync(tester);
 
     expect(find.text('AI服务暂时未完成请求，请稍后重试'), findsOneWidget);
-    expect(find.text('重试生成问题'), findsOneWidget);
-    expect(find.byTooltip('结束答辩'), findsNothing);
+    expect(find.text('重试'), findsOneWidget);
 
-    await tester.tap(find.text('重试生成问题'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('重试'));
+    await _pumpAsync(tester);
 
-    expect(find.text('如何保护原始视频？'), findsOneWidget);
-    expect(find.byTooltip('结束答辩'), findsOneWidget);
+    expect(find.text('为什么选择端云协同架构？'), findsOneWidget);
     expect(api.generationAttempts, 2);
     expect(tester.takeException(), isNull);
   });
+}
+
+Future<void> _pumpAsync(WidgetTester tester) async {
+  for (var index = 0; index < 24; index += 1) {
+    await tester.pump(const Duration(milliseconds: 20));
+  }
 }
 
 class _JuryApiClient extends ApiClient {
@@ -115,9 +113,26 @@ class _JuryApiClient extends ApiClient {
     JuryQuestion(
       id: 'question-1',
       sessionId: 'session-1',
-      category: '风险',
-      question: '如何保护原始视频？',
+      category: '技术架构',
+      question: '为什么选择端云协同架构？',
     ),
+  ];
+
+  @override
+  Future<List<JuryQuestion>> generateQuestions(
+    String projectId, {
+    String? sessionId,
+    int count = 5,
+    bool regenerate = false,
+  }) async => [
+    ...await listQuestions(projectId),
+    if (count > 1)
+      const JuryQuestion(
+        id: 'question-2',
+        sessionId: 'session-1',
+        category: '用户与场景',
+        question: '你们如何验证目标用户确实需要这项功能？',
+      ),
   ];
 
   @override
@@ -126,6 +141,7 @@ class _JuryApiClient extends ApiClient {
     String sessionId,
     String text, {
     String? parentAnswerId,
+    int? elapsedSeconds,
   }) async {
     sessionIds.add(sessionId);
     parentAnswerIds.add(parentAnswerId);
@@ -140,6 +156,7 @@ class _JuryApiClient extends ApiClient {
       evaluation: {
         'score': secondTurn ? 90 : 85,
         'follow_up': secondTurn ? null : '如何证明服务端没有原始视频？',
+        'decision': secondTurn ? 'next_question' : 'follow_up',
       },
     );
   }
@@ -159,6 +176,11 @@ class _RetryingJuryApiClient extends _JuryApiClient {
     if (generationAttempts == 1) {
       throw const ApiException('AI服务暂时未完成请求，请稍后重试');
     }
-    return listQuestions(projectId);
+    return super.generateQuestions(
+      projectId,
+      sessionId: sessionId,
+      count: count,
+      regenerate: regenerate,
+    );
   }
 }

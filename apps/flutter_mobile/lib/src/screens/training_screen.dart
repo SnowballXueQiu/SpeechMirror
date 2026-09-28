@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -14,7 +15,6 @@ import '../device_analysis.dart';
 import '../models.dart';
 import '../pending_training_store.dart';
 import '../theme.dart';
-import '../widgets.dart';
 
 final pendingTrainingStoreProvider = Provider<PendingTrainingStore>(
   (ref) => FilePendingTrainingStore(),
@@ -29,7 +29,10 @@ class TrainingScreen extends ConsumerStatefulWidget {
 }
 
 class _TrainingScreenState extends ConsumerState<TrainingScreen> {
+  static const _openingLine = '好的，请开始介绍你的项目。我会先完整听你介绍，介绍结束后正式开始答辩。';
+
   AudioRecorder? _audioRecorder;
+  final FlutterTts _tts = FlutterTts();
   CameraController? _camera;
   Project? _project;
   RehearsalSession? _session;
@@ -43,6 +46,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   bool _initializing = true;
   bool _recording = false;
   bool _processing = false;
+  bool _greeting = false;
   bool _deadlineSignaled = false;
   String? _audioPath;
   String? _setupError;
@@ -109,6 +113,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         _camera = controller;
         _initializing = false;
       });
+      unawaited(_greetAndStart());
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -117,6 +122,26 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         });
       }
     }
+  }
+
+  Future<void> _greetAndStart() async {
+    if (_recording || _processing || _greeting || _pendingTraining != null) {
+      return;
+    }
+    setState(() => _greeting = true);
+    try {
+      await _tts.setLanguage('zh-CN');
+      await _tts.setSpeechRate(0.46);
+      await _tts.setPitch(0.94);
+      await _tts.setVolume(1.0);
+      await _tts.awaitSpeakCompletion(true);
+      await _tts.speak(_openingLine);
+    } catch (_) {
+      // Recording remains available even when the simulator has no TTS voice.
+    } finally {
+      if (mounted) setState(() => _greeting = false);
+    }
+    if (mounted) await _start();
   }
 
   Future<void> _start() async {
@@ -246,7 +271,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     } catch (error) {
       if (mounted) {
         setState(() {
-          _processError = '录制已保存在本机，但分析尚未完成：$error';
+          _processError = '陈述已保存，分析尚未完成：$error';
           _processing = false;
         });
       }
@@ -308,7 +333,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     } catch (error) {
       if (mounted) {
         setState(() {
-          _processError = '本地视频未上传，待恢复记录已保留：$error';
+          _processError = '陈述已保存，分析尚未完成：$error';
           _processing = false;
         });
       }
@@ -322,12 +347,12 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     _amplitudeSubscription?.cancel();
     _camera?.dispose();
     _audioRecorder?.dispose();
+    _tts.stop();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final project = _project;
     return PopScope(
       canPop: !_recording && !_processing,
       onPopInvokedWithResult: (didPop, _) {
@@ -337,11 +362,16 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         );
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('模拟答辩')),
+        backgroundColor: Colors.black,
         body: _initializing
-            ? const Center(child: CircularProgressIndicator())
+            ? const ColoredBox(
+                color: Color(0xFF151B19),
+                child: Center(
+                  child: CircularProgressIndicator(color: Colors.white),
+                ),
+              )
             : _setupError != null
-            ? _SetupError(
+            ? _DarkSetupError(
                 message: _setupError!,
                 onRetry: () {
                   setState(() {
@@ -351,270 +381,229 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                   _initialize();
                 },
               )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+            : Stack(
+                fit: StackFit.expand,
                 children: [
-                  const DefenseStageRail(activeStage: 0),
-                  const SizedBox(height: 22),
-                  PageIntro(
-                    eyebrow: _recording
-                        ? 'PRESENTING / LOCAL VIDEO'
-                        : 'STAGE 01 / PRESENTATION',
-                    title: project?.name ?? '模拟答辩',
-                    description: '',
-                  ),
-                  const SizedBox(height: 22),
-                  if (_pendingTraining != null)
-                    _PendingTrainingStage(
-                      training: _pendingTraining!,
-                      status: _processing ? _processingLabel : null,
-                    )
-                  else
-                    _CameraStage(controller: _camera!),
-                  const SizedBox(height: 18),
-                  if (_recording || _recentLevels.isNotEmpty) ...[
-                    _LiveWaveform(levels: _recentLevels),
-                    const SizedBox(height: 14),
-                  ],
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _TimeBlock(
-                          label: '当前',
-                          value: _clock(_elapsedSeconds),
-                          accent: _deadlineSignaled,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _TimeBlock(
-                          label: '目标',
-                          value: _clock(project?.durationSeconds ?? 0),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  if (_processError != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.white,
-                        border: Border.all(color: AppColors.vermilion),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        _processError!,
-                        style: const TextStyle(color: AppColors.vermilion),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  if (_pendingTraining != null && !_recording)
-                    FilledButton.icon(
-                      onPressed: _processing ? null : _submitForAnalysis,
-                      icon: const Icon(Icons.sync),
-                      label: Text(
-                        _processError == null ? '继续进入AI答辩' : '重试陈述分析',
-                      ),
-                    )
-                  else
-                    FilledButton.icon(
-                      onPressed: _processing
-                          ? null
-                          : (_recording ? _stop : _start),
-                      icon: _processing
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
+                  _TrainingCameraSurface(controller: _camera),
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              IconButton.filled(
+                                tooltip: '退出训练',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.black54,
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: _recording || _processing
+                                    ? null
+                                    : () => context.pop(),
+                                icon: const Icon(Icons.close),
                               ),
-                            )
-                          : Icon(
-                              _recording
-                                  ? Icons.stop_circle_outlined
-                                  : Icons.fiber_manual_record,
+                              const Spacer(),
+                              _PresentationClock(seconds: _elapsedSeconds),
+                              const Spacer(),
+                              const SizedBox(width: 48),
+                            ],
+                          ),
+                          const Spacer(),
+                          if (_processError != null) ...[
+                            _TrainingErrorBanner(
+                              message: _processError!,
+                              onRetry: _pendingTraining != null
+                                  ? _submitForAnalysis
+                                  : _start,
                             ),
-                      label: Text(
-                        _processing
-                            ? _processingLabel
-                            : (_recording ? '结束陈述，进入答辩' : '开始产品陈述'),
+                            const SizedBox(height: 10),
+                          ],
+                          _TrainingStatusPanel(
+                            title: _greeting
+                                ? 'AI评委'
+                                : _processing
+                                ? '正在准备'
+                                : _recording
+                                ? '项目介绍'
+                                : '模拟答辩',
+                            message: _greeting
+                                ? _openingLine
+                                : _processing
+                                ? _processingLabel
+                                : _recording
+                                ? '请完整介绍你的项目，介绍结束后进入答辩。'
+                                : '准备好后开始介绍项目。',
+                            busy: _greeting || _processing,
+                          ),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(56),
+                                backgroundColor: _recording
+                                    ? const Color(0xFFF1F3EF)
+                                    : AppColors.jade,
+                                foregroundColor: _recording
+                                    ? AppColors.ink
+                                    : Colors.white,
+                              ),
+                              onPressed: _greeting || _processing
+                                  ? null
+                                  : _pendingTraining != null
+                                  ? _submitForAnalysis
+                                  : _recording
+                                  ? _stop
+                                  : _start,
+                              icon: _greeting || _processing
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Icon(
+                                      _recording
+                                          ? Icons.arrow_forward
+                                          : Icons.fiber_manual_record,
+                                    ),
+                              label: Text(
+                                _greeting
+                                    ? '评委正在说明流程'
+                                    : _processing
+                                    ? _processingLabel
+                                    : _pendingTraining != null
+                                    ? '继续进入答辩'
+                                    : _recording
+                                    ? '介绍完毕，开始答辩'
+                                    : '开始项目介绍',
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  const SizedBox(height: 20),
+                  ),
                 ],
               ),
       ),
     );
   }
-
-  String _clock(int seconds) =>
-      '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
 }
 
-class _PendingTrainingStage extends StatelessWidget {
-  const _PendingTrainingStage({required this.training, this.status});
+class _TrainingCameraSurface extends StatelessWidget {
+  const _TrainingCameraSurface({required this.controller});
 
-  final PendingTraining training;
-  final String? status;
+  final CameraController? controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final camera = controller;
+    if (camera == null || !camera.value.isInitialized) {
+      return const ColoredBox(
+        color: Color(0xFF151B19),
+        child: Center(
+          child: Icon(Icons.person_outline, color: Colors.white24, size: 96),
+        ),
+      );
+    }
+    final screen = MediaQuery.sizeOf(context);
+    var scale = screen.aspectRatio * camera.value.aspectRatio;
+    if (scale < 1) scale = 1 / scale;
+    return ClipRect(
+      child: Transform.scale(
+        scale: scale,
+        child: Center(child: CameraPreview(camera)),
+      ),
+    );
+  }
+}
+
+class _PresentationClock extends StatelessWidget {
+  const _PresentationClock({required this.seconds});
+
+  final int seconds;
 
   @override
   Widget build(BuildContext context) => Container(
-    key: const ValueKey('pending-training-stage'),
-    constraints: const BoxConstraints(minHeight: 280),
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
     decoration: BoxDecoration(
-      color: AppColors.ink,
-      borderRadius: BorderRadius.circular(8),
+      color: Colors.black54,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white24),
     ),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        if (status == null)
-          const Icon(Icons.video_file_outlined, size: 48, color: Colors.white)
-        else
-          const SizedBox.square(
-            dimension: 42,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: Colors.white,
-            ),
-          ),
-        const SizedBox(height: 16),
-        Text(
-          status ?? '陈述已保存在本机',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 21,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          status == null
-              ? '已保留 ${training.actualSeconds} 秒视频与音频，可继续进入AI答辩。'
-              : '正在处理 ${training.actualSeconds} 秒陈述，请保持应用在前台。',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white70, height: 1.5),
-        ),
-      ],
-    ),
-  );
-}
-
-class _CameraStage extends StatelessWidget {
-  const _CameraStage({required this.controller});
-  final CameraController controller;
-
-  @override
-  Widget build(BuildContext context) => AspectRatio(
-    aspectRatio: 3 / 4,
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ColoredBox(color: AppColors.ink, child: CameraPreview(controller)),
-        ],
+    child: Text(
+      '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 16,
+        fontWeight: FontWeight.w700,
+        fontFeatures: [FontFeature.tabularFigures()],
       ),
     ),
   );
 }
 
-class _LiveWaveform extends StatelessWidget {
-  const _LiveWaveform({required this.levels});
-
-  final List<double> levels;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    height: 64,
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    decoration: BoxDecoration(
-      color: AppColors.white,
-      border: Border.all(color: AppColors.line),
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: CustomPaint(
-      painter: _WaveformPainter(levels),
-      child: const SizedBox.expand(),
-    ),
-  );
-}
-
-class _WaveformPainter extends CustomPainter {
-  const _WaveformPainter(this.levels);
-
-  final List<double> levels;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final baseline = size.height / 2;
-    final centerPaint = Paint()
-      ..color = AppColors.line
-      ..strokeWidth = 1;
-    canvas.drawLine(
-      Offset(0, baseline),
-      Offset(size.width, baseline),
-      centerPaint,
-    );
-    if (levels.isEmpty) return;
-    final barWidth = size.width / levels.length;
-    final paint = Paint()
-      ..color = AppColors.jade
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = (barWidth * 0.42).clamp(2.0, 5.0);
-    for (var index = 0; index < levels.length; index++) {
-      final height = (4 + levels[index] * (size.height - 8)).clamp(
-        4.0,
-        size.height,
-      );
-      final x = barWidth * index + barWidth / 2;
-      canvas.drawLine(
-        Offset(x, baseline - height / 2),
-        Offset(x, baseline + height / 2),
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _WaveformPainter oldDelegate) => true;
-}
-
-class _TimeBlock extends StatelessWidget {
-  const _TimeBlock({
-    required this.label,
-    required this.value,
-    this.accent = false,
+class _TrainingStatusPanel extends StatelessWidget {
+  const _TrainingStatusPanel({
+    required this.title,
+    required this.message,
+    required this.busy,
   });
-  final String label;
-  final String value;
-  final bool accent;
+
+  final String title;
+  final String message;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
+    width: double.infinity,
+    padding: const EdgeInsets.all(18),
     decoration: BoxDecoration(
-      color: AppColors.white,
-      border: Border.all(color: accent ? AppColors.vermilion : AppColors.line),
-      borderRadius: BorderRadius.circular(6),
+      color: const Color(0xD91A211E),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.white24),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: AppColors.muted, fontSize: 12),
+        Row(
+          children: [
+            if (busy)
+              const SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF8AD8C1),
+                ),
+              )
+            else
+              const Icon(
+                Icons.videocam_outlined,
+                size: 17,
+                color: Color(0xFF8AD8C1),
+              ),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Color(0xFFB6C5BF),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 10),
         Text(
-          value,
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: accent ? AppColors.vermilion : AppColors.ink,
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            height: 1.45,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ],
@@ -622,40 +611,86 @@ class _TimeBlock extends StatelessWidget {
   );
 }
 
-class _SetupError extends StatelessWidget {
-  const _SetupError({required this.message, required this.onRetry});
+class _TrainingErrorBanner extends StatelessWidget {
+  const _TrainingErrorBanner({required this.message, required this.onRetry});
+
   final String message;
   final VoidCallback onRetry;
+
   @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(28),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.no_photography_outlined,
-            size: 42,
-            color: AppColors.vermilion,
-          ),
-          const SizedBox(height: 14),
-          const Text(
-            '无法启动训练摄像头',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          Text(
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+    decoration: BoxDecoration(
+      color: const Color(0xE6451F1A),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.error_outline, color: Colors.white, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
             message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.muted),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white),
           ),
-          const SizedBox(height: 18),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh),
-            label: const Text('重新检查'),
-          ),
-        ],
+        ),
+        TextButton(
+          onPressed: onRetry,
+          child: const Text('重试', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DarkSetupError extends StatelessWidget {
+  const _DarkSetupError({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: const Color(0xFF151B19),
+    child: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.no_photography_outlined,
+              size: 42,
+              color: Colors.white70,
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              '无法启动训练摄像头',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white60),
+            ),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white38),
+              ),
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('重新检查'),
+            ),
+          ],
+        ),
       ),
     ),
   );

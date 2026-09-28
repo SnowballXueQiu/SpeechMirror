@@ -331,6 +331,7 @@ class ApiClient {
     String sessionId,
     String text, {
     String? parentAnswerId,
+    int? elapsedSeconds,
   }) async {
     final response = await _authorized(
       () => _dio.post<Map<String, dynamic>>(
@@ -339,6 +340,7 @@ class ApiClient {
           'session_id': sessionId,
           'answer_text': text,
           'parent_answer_id': parentAnswerId,
+          if (elapsedSeconds != null) 'elapsed_seconds': elapsedSeconds,
         },
       ),
     );
