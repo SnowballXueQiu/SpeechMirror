@@ -324,6 +324,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       await ref.read(pendingTrainingStoreProvider).delete(widget.projectId);
       final audio = File(pending.audioPath);
       if (await audio.exists()) await audio.delete();
+      await _releaseCameraForTransition();
       if (mounted) {
         setState(() => _pendingTraining = null);
         context.go(
@@ -338,6 +339,12 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         });
       }
     }
+  }
+
+  Future<void> _releaseCameraForTransition() async {
+    final camera = _camera;
+    _camera = null;
+    if (camera != null) await camera.dispose();
   }
 
   @override
