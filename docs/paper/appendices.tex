@@ -9,11 +9,17 @@
 /auth/register & POST & 注册并签发令牌 \\
 /auth/login & POST & 登录并签发令牌 \\
 /auth/refresh & POST & 轮换刷新令牌 \\
+/auth/logout & POST & 撤销当前刷新令牌 \\
+/me & GET/PUT & 读取或更新简介、身份、多选场景、目标和调研同意 \\
+/me/avatar & GET/\allowbreak POST/\allowbreak DELETE & 读取、上传或删除PNG/JPEG头像，最大2~MiB \\
+/me/activity & GET/POST & 读取365天活跃记录或记录当日使用 \\
 /projects & GET/POST & 项目列表与创建 \\
 /projects/\{id\} & GET/\allowbreak PUT/\allowbreak DELETE & 项目读取、更新和彻底删除 \\
 /projects/\{id\}/\allowbreak documents & GET/\allowbreak POST & 材料列表与上传 \\
+/documents/\{id\} & GET & 读取材料元数据、状态和提取文本 \\
 /documents/\{id\}/\allowbreak text & PUT & 纠正并重新索引文本 \\
 /projects/\{id\}/\allowbreak sessions & GET/\allowbreak POST & 训练历史与创建 \\
+/sessions/\{id\} & GET & 读取训练会话和处理状态 \\
 /sessions/\{id\}/\allowbreak metrics & POST & 上传端侧派生指标 \\
 /sessions/\{id\}/\allowbreak audio & POST & 临时音频ASR \\
 /sessions/\{id\}/\allowbreak answer-audio & POST & 回答音频临时转写，不覆盖训练转写 \\
@@ -37,6 +43,8 @@
 \midrule
 \endhead
 users & username唯一索引 & 只保存Argon2id密码摘要 \\
+\path{user_profiles} & \path{user_id}唯一外键 & 调研同意默认false；多场景数组为规范字段，旧单场景字段用于兼容 \\
+\path{user_activity_days} & \path{(user_id, activity_date)}联合主键 & 当地日期只允许在UTC日期前后一日内；分别累计使用与练习次数 \\
 \path{refresh_tokens} & \path{user_id}外键 & 只保存SHA-256摘要，刷新时原子撤销 \\
 projects & \path{user_id}外键 & 所有读写均按当前用户过滤 \\
 documents & \path{project_id}外键 & 状态在processing、ready和failed之间迁移 \\
@@ -54,11 +62,13 @@ reports & \path{session_id}唯一关联 & 未采集维度以null表达 \\
 cd services/api
 cargo fmt --check
 cargo test
+cargo clippy --all-targets --all-features -- -D warnings
 
 cd apps/flutter_mobile
 flutter analyze
 flutter test
 flutter build apk --debug
+flutter build ios --profile --no-codesign
 
 cd native/edge_vision
 cmake -S . -B build
@@ -68,6 +78,44 @@ ctest --test-dir build --output-on-failure
 cd docs/paper
 make render
 \end{lstlisting}
+
+\chapter{答辩决策与评分约束摘要}
+\begin{longtable}{>{\raggedright\arraybackslash}p{4.0cm}>{\raggedright\arraybackslash}p{4.8cm}p{5.9cm}}
+\toprule 规则对象 & 实现约束 & 用户可见结果 \\
+\midrule
+\endfirsthead
+\toprule 规则对象 & 实现约束 & 用户可见结果 \\
+\midrule
+\endhead
+项目介绍 & 用户明确结束后才进入评委阶段 & 介绍期间不被提前提问 \\
+长停顿 & 检测到有效语音后才累计静音区间 & 开头准备时间不记为长停顿 \\
+主问题 & 一次只生成并播报一个核心问题 & 不出现多题连问和列表编号 \\
+追问 & 只核查一个关键漏洞，最多两层 & 模糊回答被追问，明确不会则换题 \\
+结束条件 & 至少3道主问题；最多10道主问题或14轮回答 & 题数随覆盖程度变化，不设置倒计时 \\
+计时 & 模型、识别和播报阶段暂停 & 显示答辩者累计表达时间 \\
+自动恢复 & 外部请求最多重试5次 & 显示当前次数，之后提供手动重试 \\
+评分 & 原始模型分受材料与覆盖规则限制 & 跑题、胡编和无依据回答不能获得高分 \\
+详细评价 & 默认折叠，保留手动展开 & 首屏突出证据、缺失点和改进建议 \\
+\bottomrule
+\end{longtable}
+
+\chapter{用户画像与隐私字段摘要}
+\begin{longtable}{>{\raggedright\arraybackslash}p{4.0cm}>{\raggedright\arraybackslash}p{4.7cm}p{6.0cm}}
+\toprule 字段或功能 & 数据形式 & 边界 \\
+\midrule
+\endfirsthead
+\toprule 字段或功能 & 数据形式 & 边界 \\
+\midrule
+\endhead
+identity & 单选枚举与可选其他文本 & 可跳过，可在用户中心修改 \\
+scenarios & 去重字符串数组，最多7项 & 支持毕业答辩、课程答辩、竞赛、路演、面试和其他多选 \\
+purposes & 去重字符串数组与可选其他文本 & 用于记录多个训练目标 \\
+research\_consent & 布尔值，默认false & 只允许汇总身份、场景与目标，不包含训练内容 \\
+avatar & PNG或JPEG二进制，最大2~MiB & 读取、替换与删除均要求本人令牌 \\
+activity & 365个每日计数 & 展示活跃度，不形成用户排名 \\
+cache & 系统临时目录与图片缓存 & 不删除应用文档目录中的待提交训练媒体 \\
+\bottomrule
+\end{longtable}
 
 \chapter{关键配置说明}
 \begin{longtable}{>{\raggedright\arraybackslash}p{5.7cm}p{8.7cm}}
