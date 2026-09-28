@@ -769,7 +769,8 @@ async fn generate_questions(
         ));
     }
     let material = material_context(&chunks);
-    let category_plan = question_category_plan(count);
+    let variation_key = body.session_id.as_deref().unwrap_or(&project_id);
+    let category_plan = question_category_plan_for_key(count, variation_key);
     let existing_questions = existing
         .iter()
         .map(|item| item.question.clone())
@@ -874,7 +875,7 @@ const CORE_QUESTION_CATEGORIES: [&str; 8] = [
     "风险与边界",
     "成本与落地",
 ];
-const QUESTION_GENERATION_MAX_ATTEMPTS: usize = 3;
+const QUESTION_GENERATION_MAX_ATTEMPTS: usize = 2;
 
 #[derive(Debug)]
 struct QuestionCandidate {
@@ -883,10 +884,20 @@ struct QuestionCandidate {
     evidence: Vec<EvidenceRef>,
 }
 
+#[cfg(test)]
 fn question_category_plan(count: usize) -> Vec<&'static str> {
+    question_category_plan_for_key(count, "")
+}
+
+fn question_category_plan_for_key(count: usize, variation_key: &str) -> Vec<&'static str> {
+    let rotation = variation_key
+        .bytes()
+        .fold(0usize, |total, byte| total.wrapping_add(byte as usize))
+        % CORE_QUESTION_CATEGORIES.len();
     CORE_QUESTION_CATEGORIES
         .into_iter()
         .cycle()
+        .skip(rotation)
         .take(count)
         .collect()
 }
@@ -1087,6 +1098,93 @@ fn question_has_grounding(question: &str, evidence: &[EvidenceRef]) -> bool {
     pair_overlap_count(question, &evidence) >= 1
 }
 
+fn category_evidence_query(category: &str) -> &'static str {
+    match category {
+        "背景与需求" => "用户 需求 痛点 目标 现有方案 调研",
+        "用户与场景" => "用户 使用场景 流程 功能 反馈",
+        "技术架构" => "架构 客户端 后端 数据流 通信 部署",
+        "核心实现" => "实现 模型 RAG 知识库 算法 Prompt 接口 数据库",
+        "数据与验证" => "数据 测试 实验 结果 指标 对照 验证",
+        "创新与对照" => "创新 差异 对比 HarmonyOS 国产 DeepSeek",
+        "风险与边界" => "风险 安全 隐私 异常 失败 限制 降级",
+        "成本与落地" => "成本 性能 并发 扩展 部署 落地",
+        _ => "项目 方案 实现 结果",
+    }
+}
+
+fn evidence_focus(quote: &str) -> String {
+    let cleaned = quote
+        .trim()
+        .trim_start_matches(['-', '*', '#', ' ', '\t'])
+        .replace(['`', '"', '“', '”', '「', '」'], "");
+    let clause = cleaned
+        .split(['。', '！', '？', '!', '?', ';', '；', '\n'])
+        .map(str::trim)
+        .find(|part| part.chars().count() >= 8)
+        .unwrap_or(cleaned.trim());
+    let mut focus = clause.chars().take(36).collect::<String>();
+    if clause.chars().count() > 36 {
+        focus.push('…');
+    }
+    focus
+}
+
+fn fallback_question(category: &str, variant: usize, evidence: &EvidenceRef) -> String {
+    let focus = evidence_focus(&evidence.quote);
+    let question = match (category, variant) {
+        ("背景与需求", 0) => {
+            format!("你们的材料提到：{focus}。这个设计针对什么真实需求，调研依据是什么？")
+        }
+        ("背景与需求", _) => {
+            format!("你们的材料提到：{focus}。现有方案具体差在哪里，为什么值得单独做这个项目？")
+        }
+        ("用户与场景", 0) => {
+            format!("你们的材料提到：{focus}。请用一个真实场景说明用户如何完成完整流程？")
+        }
+        ("用户与场景", _) => {
+            format!("你们的材料提到：{focus}。哪类用户最需要它，你们如何验证使用价值？")
+        }
+        ("技术架构", 0) => {
+            format!("你们的材料提到：{focus}。请说明一次请求经过哪些模块，数据如何流转？")
+        }
+        ("技术架构", _) => {
+            format!("你们的材料提到：{focus}。为什么选择这一架构，替代方案为什么没有采用？")
+        }
+        ("核心实现", 0) => {
+            format!("你们的材料提到：{focus}。它的输入、关键处理步骤和输出分别是什么？")
+        }
+        ("核心实现", _) => {
+            format!("你们的材料提到：{focus}。这个模块如何处理异常，失败后如何降级？")
+        }
+        ("数据与验证", 0) => {
+            format!("你们的材料提到：{focus}。这个结论用什么条件、指标和对照结果验证？")
+        }
+        ("数据与验证", _) => {
+            format!("你们的材料提到：{focus}。现有测试证明了什么，又有哪些边界没有覆盖？")
+        }
+        ("创新与对照", 0) => {
+            format!("你们的材料提到：{focus}。它与现有同类方案的关键差异是什么？")
+        }
+        ("创新与对照", _) => {
+            format!("你们的材料提到：{focus}。如果去掉这项设计，项目的核心价值还剩什么？")
+        }
+        ("风险与边界", 0) => {
+            format!("你们的材料提到：{focus}。它在什么真实条件下会失效，系统如何处理？")
+        }
+        ("风险与边界", _) => {
+            format!("你们的材料提到：{focus}。关键依赖不可用时如何降级并避免误导用户？")
+        }
+        ("成本与落地", 0) => {
+            format!("你们的材料提到：{focus}。用户量扩大一百倍时，最先出现的瓶颈是什么？")
+        }
+        ("成本与落地", _) => {
+            format!("你们的材料提到：{focus}。单次使用成本如何估算，当前最大的落地限制是什么？")
+        }
+        _ => format!("你们的材料提到：{focus}。为什么这样设计，如何验证其效果？"),
+    };
+    question.chars().take(100).collect()
+}
+
 fn fill_fallback_question_candidates_with_history(
     category_plan: &[&'static str],
     chunks: &[crate::entities::document_chunk::Model],
@@ -1110,69 +1208,13 @@ fn fill_fallback_question_candidates_with_history(
                 .iter()
                 .flat_map(|candidate| candidate.evidence.iter().cloned()),
         );
+        let evidence_query = category_evidence_query(category);
         let evidence =
-            best_evidence_quote_excluding(chunks, category, offset + index, &used_evidence)
-                .or_else(|| best_evidence_quote(chunks, category, offset + index));
+            best_evidence_quote_excluding(chunks, evidence_query, offset + index, &used_evidence)
+                .or_else(|| best_evidence_quote(chunks, evidence_query, offset + index));
         let Some(evidence) = evidence else { continue };
         let variant = (offset + index) % 2;
-        let question = match (category, variant) {
-            ("背景与需求", 0) => {
-                "你们做过哪些用户调研？请说明样本、主要结果，以及结果具体改变了哪项产品设计。"
-                    .to_owned()
-            }
-            ("背景与需求", _) => {
-                "这个项目最先要解决的真实问题是什么？现有方案为什么不能满足目标用户？".to_owned()
-            }
-            ("用户与场景", 0) => {
-                "请用一个真实使用场景说明用户从开始操作到获得结果的完整流程，最关键的一步是什么？"
-                    .to_owned()
-            }
-            ("用户与场景", _) => {
-                "你们如何确认目标用户会持续使用这项功能，而不只是偶尔尝试一次？".to_owned()
-            }
-            ("技术架构", 0) => {
-                "请从客户端的一次操作开始，说明数据经过哪些模块、如何通信，最终怎样返回结果。"
-                    .to_owned()
-            }
-            ("技术架构", _) => {
-                "当前架构中最关键的技术选型是什么？为什么没有采用你们比较过的替代方案？".to_owned()
-            }
-            ("核心实现", 0) => {
-                "请选择项目最核心的一项能力，具体说明它的输入、处理步骤和输出。".to_owned()
-            }
-            ("核心实现", _) => {
-                "这个核心模块是如何实现的？请说清关键数据结构、异常处理和失败后的降级方式。"
-                    .to_owned()
-            }
-            ("数据与验证", 0) => {
-                "你们声称的效果是怎样测出来的？请说明测试条件、对照基准、评价指标和实际结果。"
-                    .to_owned()
-            }
-            ("数据与验证", _) => {
-                "现有测试最能证明项目有效的一组数据是什么？这组数据有什么尚未覆盖的边界？"
-                    .to_owned()
-            }
-            ("创新与对照", 0) => {
-                "与现有同类方案相比，你们最关键的差异是什么？有没有可复现的对照结果？".to_owned()
-            }
-            ("创新与对照", _) => {
-                "如果去掉项目中的人工智能能力，哪些核心价值仍然成立，哪些会直接消失？".to_owned()
-            }
-            ("风险与边界", 0) => {
-                "当前方案在哪种真实条件下最容易失败？系统如何识别并处理这种情况？".to_owned()
-            }
-            ("风险与边界", _) => {
-                "当关键外部服务不可用或返回错误结果时，系统如何降级并避免误导用户？".to_owned()
-            }
-            ("成本与落地", 0) => {
-                "如果用户量扩大一百倍，最先出现的成本或性能瓶颈是什么？你们准备如何处理？"
-                    .to_owned()
-            }
-            ("成本与落地", _) => {
-                "项目实际部署后的单次使用成本如何估算？目前最影响落地的限制是什么？".to_owned()
-            }
-            _ => "请说明这个方案的选择理由、实际实现和可核验结果。".to_owned(),
-        };
+        let question = fallback_question(category, variant, &evidence);
         if !candidate_is_novel(
             &question,
             std::slice::from_ref(&evidence),
@@ -1240,7 +1282,16 @@ fn accept_question_candidates_with_history(
         {
             continue;
         }
-        let evidence = verified_evidence(item.get("evidence"), chunks);
+        let mut evidence = verified_evidence(item.get("evidence"), chunks);
+        if evidence.is_empty()
+            && let Some(rebound) = best_evidence_quote(
+                chunks,
+                &format!("{} {question}", category_evidence_query(category)),
+                0,
+            )
+        {
+            evidence.push(rebound);
+        }
         if evidence.is_empty() {
             continue;
         }
@@ -2085,7 +2136,7 @@ mod route_tests {
     }
 
     #[test]
-    fn question_candidates_require_exact_category_question_and_evidence() {
+    fn question_candidates_repair_invalid_evidence_but_keep_strict_questions() {
         let chunks = vec![question_test_chunk()];
         let plan = question_category_plan(5);
         let value = json!({"questions": [
@@ -2100,13 +2151,28 @@ mod route_tests {
 
         accept_question_candidates(&value, &chunks, &plan, &mut candidates);
 
-        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates.len(), 3);
         assert_eq!(candidates[0].category, "背景与需求");
-        assert_eq!(candidates[1].category, "核心实现");
+        assert_eq!(candidates[1].category, "技术架构");
+        assert_eq!(candidates[2].category, "核心实现");
+        assert_eq!(
+            candidates[1].evidence[0].quote,
+            "系统采用端云协同架构，原始视频只保存在手机本地。"
+        );
         assert_eq!(
             missing_question_categories(&plan, &candidates),
-            vec!["用户与场景", "技术架构", "数据与验证"]
+            vec!["用户与场景", "数据与验证"]
         );
+    }
+
+    #[test]
+    fn different_sessions_rotate_the_question_dimensions_stably() {
+        let first = question_category_plan_for_key(4, "session-a");
+        let repeated = question_category_plan_for_key(4, "session-a");
+        let second = question_category_plan_for_key(4, "session-b");
+
+        assert_eq!(first, repeated);
+        assert_ne!(first, second);
     }
 
     #[test]
@@ -2154,6 +2220,7 @@ mod route_tests {
 
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].question.chars().count() <= 100);
+        assert!(candidates[0].question.contains("文本提取"));
         assert!(candidates[0].evidence[0].quote.chars().count() > 28);
     }
 
