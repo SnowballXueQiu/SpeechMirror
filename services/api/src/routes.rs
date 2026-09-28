@@ -1122,8 +1122,18 @@ fn evidence_focus(quote: &str) -> String {
         .map(str::trim)
         .find(|part| part.chars().count() >= 8)
         .unwrap_or(cleaned.trim());
-    let mut focus = clause.chars().take(36).collect::<String>();
-    if clause.chars().count() > 36 {
+    let characters = clause.chars().collect::<Vec<_>>();
+    let mut end = characters.len().min(36);
+    while end < characters.len()
+        && end < 52
+        && (characters[end - 1].is_ascii_alphanumeric()
+            || characters[end].is_ascii_alphanumeric()
+            || characters[end] == '_')
+    {
+        end += 1;
+    }
+    let mut focus = characters[..end].iter().collect::<String>();
+    if end < characters.len() {
         focus.push('…');
     }
     focus
@@ -1133,54 +1143,54 @@ fn fallback_question(category: &str, variant: usize, evidence: &EvidenceRef) -> 
     let focus = evidence_focus(&evidence.quote);
     let question = match (category, variant) {
         ("背景与需求", 0) => {
-            format!("你们的材料提到：{focus}。这个设计针对什么真实需求，调研依据是什么？")
+            format!("{focus}。这个设计针对什么真实需求，调研依据是什么？")
         }
         ("背景与需求", _) => {
-            format!("你们的材料提到：{focus}。现有方案具体差在哪里，为什么值得单独做这个项目？")
+            format!("{focus}。现有方案具体差在哪里，为什么值得单独做这个项目？")
         }
         ("用户与场景", 0) => {
-            format!("你们的材料提到：{focus}。请用一个真实场景说明用户如何完成完整流程？")
+            format!("{focus}。请用一个真实场景说明用户如何完成完整流程？")
         }
         ("用户与场景", _) => {
-            format!("你们的材料提到：{focus}。哪类用户最需要它，你们如何验证使用价值？")
+            format!("{focus}。哪类用户最需要它，你们如何验证使用价值？")
         }
         ("技术架构", 0) => {
-            format!("你们的材料提到：{focus}。请说明一次请求经过哪些模块，数据如何流转？")
+            format!("{focus}。请说明一次请求经过哪些模块，数据如何流转？")
         }
         ("技术架构", _) => {
-            format!("你们的材料提到：{focus}。为什么选择这一架构，替代方案为什么没有采用？")
+            format!("{focus}。为什么选择这一架构，替代方案为什么没有采用？")
         }
         ("核心实现", 0) => {
-            format!("你们的材料提到：{focus}。它的输入、关键处理步骤和输出分别是什么？")
+            format!("{focus}。它的输入、关键处理步骤和输出分别是什么？")
         }
         ("核心实现", _) => {
-            format!("你们的材料提到：{focus}。这个模块如何处理异常，失败后如何降级？")
+            format!("{focus}。这个模块如何处理异常，失败后如何降级？")
         }
         ("数据与验证", 0) => {
-            format!("你们的材料提到：{focus}。这个结论用什么条件、指标和对照结果验证？")
+            format!("{focus}。这个结论用什么条件、指标和对照结果验证？")
         }
         ("数据与验证", _) => {
-            format!("你们的材料提到：{focus}。现有测试证明了什么，又有哪些边界没有覆盖？")
+            format!("{focus}。现有测试证明了什么，又有哪些边界没有覆盖？")
         }
         ("创新与对照", 0) => {
-            format!("你们的材料提到：{focus}。它与现有同类方案的关键差异是什么？")
+            format!("{focus}。它与现有同类方案的关键差异是什么？")
         }
         ("创新与对照", _) => {
-            format!("你们的材料提到：{focus}。如果去掉这项设计，项目的核心价值还剩什么？")
+            format!("{focus}。如果去掉这项设计，项目的核心价值还剩什么？")
         }
         ("风险与边界", 0) => {
-            format!("你们的材料提到：{focus}。它在什么真实条件下会失效，系统如何处理？")
+            format!("{focus}。它在什么真实条件下会失效，系统如何处理？")
         }
         ("风险与边界", _) => {
-            format!("你们的材料提到：{focus}。关键依赖不可用时如何降级并避免误导用户？")
+            format!("{focus}。关键依赖不可用时如何降级并避免误导用户？")
         }
         ("成本与落地", 0) => {
-            format!("你们的材料提到：{focus}。用户量扩大一百倍时，最先出现的瓶颈是什么？")
+            format!("{focus}。用户量扩大一百倍时，最先出现的瓶颈是什么？")
         }
         ("成本与落地", _) => {
-            format!("你们的材料提到：{focus}。单次使用成本如何估算，当前最大的落地限制是什么？")
+            format!("{focus}。单次使用成本如何估算，当前最大的落地限制是什么？")
         }
-        _ => format!("你们的材料提到：{focus}。为什么这样设计，如何验证其效果？"),
+        _ => format!("{focus}。为什么这样设计，如何验证其效果？"),
     };
     question.chars().take(100).collect()
 }
@@ -2222,6 +2232,16 @@ mod route_tests {
         assert!(candidates[0].question.chars().count() <= 100);
         assert!(candidates[0].question.contains("文本提取"));
         assert!(candidates[0].evidence[0].quote.chars().count() > 28);
+    }
+
+    #[test]
+    fn material_focus_never_splits_an_ascii_technical_name() {
+        let focus = evidence_focus(
+            "AI层通过LlmProvider、AsrProvider和OcrProvider接口隔离不同服务商，并支持失败降级。",
+        );
+
+        assert!(!focus.ends_with("Prov…"));
+        assert!(focus.contains("OcrProvider"));
     }
 
     #[test]
