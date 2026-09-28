@@ -645,6 +645,13 @@ async fn analyze_session(
     if !state.ai.is_llm_configured() {
         return Err(ApiError::AiNotConfigured);
     }
+    if let Some(existing) = report::Entity::find()
+        .filter(report::Column::SessionId.eq(&session_id))
+        .one(&state.db)
+        .await?
+    {
+        return Ok(Json(report_response(existing)?));
+    }
     let job_id = enqueue_report_generation(&state, &session_id).await?;
     wait_for_job(&state, &job_id).await?;
     let report = report::Entity::find()

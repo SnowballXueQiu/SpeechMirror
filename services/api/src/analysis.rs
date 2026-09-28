@@ -652,14 +652,12 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
     let transcript = session
         .transcript
         .clone()
-        .filter(|v| !v.trim().is_empty())
-        .ok_or_else(|| ApiError::BadRequest("session does not contain a transcript".into()))?;
-    let actual_seconds = session
-        .actual_seconds
-        .unwrap_or(session.target_seconds)
-        .max(1);
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_default();
+    let has_presentation = !transcript.is_empty();
+    let actual_seconds = session.actual_seconds.unwrap_or_default().max(0);
     let character_count = transcript.chars().filter(|c| !c.is_whitespace()).count();
-    let characters_per_minute = character_count as f64 * 60.0 / actual_seconds as f64;
+    let characters_per_minute = character_count as f64 * 60.0 / actual_seconds.max(1) as f64;
     let filler_counts = count_fillers(&transcript);
     let metrics = session_metric::Entity::find()
         .filter(session_metric::Column::SessionId.eq(session_id))
@@ -678,21 +676,36 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         visible.len() as f64 / metrics.len() as f64
     };
 
-    let chunks = retrieve_chunks(state, &session.project_id, &transcript, 12).await?;
+    let retrieval_query = if has_presentation {
+        transcript.as_str()
+    } else {
+        "项目背景 用户需求 技术实现 创新 验证 风险"
+    };
+    let chunks = retrieve_chunks(state, &session.project_id, retrieval_query, 12).await?;
     let material = material_context(&chunks);
     let prompt = format!(
         "项目材料：\n{material}\n\n答辩转写：\n{transcript}\n\n请只返回JSON，字段为score(0-100整数)、summary、covered_points数组、missing_points数组、unsupported_claims数组、evidence数组（每项含chunk_id和完整quote）、suggestions数组、confidence(0-1)。先建立材料事实清单，再评价陈述覆盖了哪些事实、遗漏哪些事实、是否有矛盾或无依据断言；证据必须引用给出的材料编号和连续完整原文，不能编造。suggestions逐条对应missing_points或unsupported_claims，必须给出具体补救动作。"
     );
-    let mut content_json = match state
-        .ai
-        .chat_json_fast(&content_system_prompt(), &prompt)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::warn!(error = %error, "content report evaluation fell back to material feedback");
-            fallback_content_evaluation(&transcript, &chunks)
+    let mut content_json = if has_presentation {
+        match state
+            .ai
+            .chat_json_fast(&content_system_prompt(), &prompt)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(error = %error, "content report evaluation fell back to material feedback");
+                fallback_content_evaluation(&transcript, &chunks)
+            }
         }
+    } else {
+        json!({
+            "score": 0,
+            "summary": "本次从AI评委环节直接开始，未完成项目陈述，无法评价陈述内容覆盖情况。",
+            "evidence": [],
+            "suggestions": ["先完成一次完整的项目陈述，再进入AI评委问答。"],
+            "confidence": null
+        })
     };
     let mut evidence = verified_evidence(content_json.get("evidence"), &chunks);
     if evidence.is_empty() && !chunks.is_empty() {
@@ -704,7 +717,11 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         .and_then(Value::as_i64)
         .unwrap_or(0)
         .clamp(0, 100);
-    let content_score = calibrate_content_score(raw_content_score, &transcript, &chunks);
+    let content_score = if has_presentation {
+        calibrate_content_score(raw_content_score, &transcript, &chunks)
+    } else {
+        0
+    };
     let content = DimensionReport {
         score: Some(content_score),
         summary: content_json
@@ -717,14 +734,21 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
 
     let filler_total: usize = filler_counts.values().sum();
     let pause_penalty = long_pause_count.unwrap_or_default() as f64 * 3.0;
-    let delivery_score =
+    let delivery_score = if has_presentation {
         (100.0 - filler_total as f64 * 3.0 - pause_penalty - speed_penalty(characters_per_minute))
             .round()
-            .clamp(0.0, 100.0) as i32;
-    let duration_delta = (actual_seconds - session.target_seconds).unsigned_abs() as f64;
-    let timing_score = (100.0 - duration_delta / session.target_seconds.max(1) as f64 * 100.0)
-        .round()
-        .clamp(0.0, 100.0) as i32;
+            .clamp(0.0, 100.0) as i32
+    } else {
+        0
+    };
+    let timing_score = if has_presentation {
+        let duration_delta = (actual_seconds - session.target_seconds).unsigned_abs() as f64;
+        (100.0 - duration_delta / session.target_seconds.max(1) as f64 * 100.0)
+            .round()
+            .clamp(0.0, 100.0) as i32
+    } else {
+        0
+    };
     let visual_score = ((gaze * 0.45 + posture * 0.35 + face_ratio * 0.2) * 100.0)
         .round()
         .clamp(0.0, 100.0) as i32;
@@ -781,10 +805,10 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         }
         suggestions.push(suggestion.into());
     }
-    if characters_per_minute < 180.0 {
+    if has_presentation && characters_per_minute < 180.0 {
         suggestions.push("语速偏慢，可缩短铺垫并提高信息密度。".into());
     }
-    if characters_per_minute > 260.0 {
+    if has_presentation && characters_per_minute > 260.0 {
         suggestions.push("语速偏快，应在技术要点和数据结论后留出停顿。".into());
     }
     if filler_total > 5 {
@@ -839,22 +863,30 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         audio_waveform,
         content,
         delivery: DimensionReport {
-            score: Some(delivery_score),
-            summary: format!(
-                "平均语速{characters_per_minute:.0}字/分钟，检测到{filler_total}次口头禅{}。",
-                long_pause_count.map_or_else(
-                    || "，未获得可用的停顿波形".to_owned(),
-                    |count| format!("、{count}次长停顿")
+            score: has_presentation.then_some(delivery_score),
+            summary: if has_presentation {
+                format!(
+                    "平均语速{characters_per_minute:.0}字/分钟，检测到{filler_total}次口头禅{}。",
+                    long_pause_count.map_or_else(
+                        || "，未获得可用的停顿波形".to_owned(),
+                        |count| format!("、{count}次长停顿")
+                    )
                 )
-            ),
+            } else {
+                "未采集项目陈述音频，本维度不评分。".into()
+            },
             evidence: Vec::new(),
         },
         timing: DimensionReport {
-            score: Some(timing_score),
-            summary: format!(
-                "目标{}秒，实际{}秒。",
-                session.target_seconds, actual_seconds
-            ),
+            score: has_presentation.then_some(timing_score),
+            summary: if has_presentation {
+                format!(
+                    "目标{}秒，实际{}秒。",
+                    session.target_seconds, actual_seconds
+                )
+            } else {
+                "未完成项目陈述，本维度不评分。".into()
+            },
             evidence: Vec::new(),
         },
         visual,
