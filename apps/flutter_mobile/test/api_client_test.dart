@@ -199,12 +199,14 @@ void main() {
       'session-1',
       '通过检查服务端不保存原始视频。',
       parentAnswerId: 'answer-1',
+      requestId: 'request-1',
     );
 
     expect(requestBody, {
       'session_id': 'session-1',
       'answer_text': '通过检查服务端不保存原始视频。',
       'parent_answer_id': 'answer-1',
+      'request_id': 'request-1',
     });
     expect(answer.askedQuestion, '如何验证隐私设计？');
     expect(answer.parentAnswerId, 'answer-1');

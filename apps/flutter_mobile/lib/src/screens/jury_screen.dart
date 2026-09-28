@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -32,6 +33,8 @@ class JuryScreen extends ConsumerStatefulWidget {
 }
 
 class _JuryScreenState extends ConsumerState<JuryScreen> {
+  static const _maxAutomaticRetries = 5;
+
   final AudioRecorder _recorder = AudioRecorder();
   final FlutterTts _tts = FlutterTts();
   final TextEditingController _answer = TextEditingController();
@@ -45,8 +48,11 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   String? _sessionId;
   String? _activePrompt;
   String? _parentAnswerId;
+  String? _pendingAudioPath;
+  String? _pendingRequestId;
   String? _error;
   int _elapsedSeconds = 0;
+  int _automaticRetryAttempt = 0;
   bool _loading = true;
   bool _recording = false;
   bool _transcribing = false;
@@ -68,16 +74,20 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   }
 
   Future<void> _initialize() async {
-    unawaited(_initializeCamera());
+    if (_camera == null) unawaited(_initializeCamera());
     try {
       await _configureSpeech();
       final api = ref.read(apiClientProvider);
-      final project = await api.getProject(widget.projectId);
+      final project = await _withAutomaticRetry(
+        () => api.getProject(widget.projectId),
+      );
       final session = await _ensureSession(project);
-      final questions = await api.generateQuestions(
-        widget.projectId,
-        sessionId: session,
-        count: 1,
+      final questions = await _withAutomaticRetry(
+        () => api.generateQuestions(
+          widget.projectId,
+          sessionId: session,
+          count: 1,
+        ),
       );
       if (!mounted) return;
       setState(() {
@@ -97,7 +107,35 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     }
   }
 
+  Future<T> _withAutomaticRetry<T>(Future<T> Function() operation) async {
+    Object? lastError;
+    for (var attempt = 0; attempt <= _maxAutomaticRetries; attempt += 1) {
+      if (attempt > 0) {
+        if (!mounted) throw StateError('答辩页面已关闭');
+        setState(() {
+          _automaticRetryAttempt = attempt;
+          _error = null;
+        });
+        await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
+      }
+      try {
+        final result = await operation();
+        if (mounted && _automaticRetryAttempt != 0) {
+          setState(() => _automaticRetryAttempt = 0);
+        }
+        return result;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (mounted && _automaticRetryAttempt != 0) {
+      setState(() => _automaticRetryAttempt = 0);
+    }
+    throw lastError ?? StateError('AI服务暂时未完成请求');
+  }
+
   Future<void> _initializeCamera() async {
+    if (_camera != null) return;
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) return;
@@ -217,26 +255,8 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
         }
         return;
       }
-      try {
-        final transcript = await ref
-            .read(apiClientProvider)
-            .uploadAudio(_sessionId!, path, answerOnly: true);
-        _answer.text = transcript;
-        if (mounted) {
-          setState(() => _transcribing = false);
-          _resumeTimer();
-          await _showAnswerSheet();
-        }
-      } catch (error) {
-        if (mounted) {
-          setState(() => _transcribing = false);
-          _resumeTimer();
-          showError(context, error);
-        }
-      } finally {
-        final file = File(path);
-        if (await file.exists()) await file.delete();
-      }
+      _pendingAudioPath = path;
+      await _transcribePendingAudio();
       return;
     }
 
@@ -255,6 +275,39 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       path: path,
     );
     if (mounted) setState(() => _recording = true);
+  }
+
+  Future<void> _transcribePendingAudio() async {
+    final path = _pendingAudioPath;
+    if (path == null) return;
+    _pauseTimer();
+    if (mounted) {
+      setState(() {
+        _transcribing = true;
+        _error = null;
+      });
+    }
+    try {
+      final transcript = await _withAutomaticRetry(
+        () => ref
+            .read(apiClientProvider)
+            .uploadAudio(_sessionId!, path, answerOnly: true),
+      );
+      _answer.text = transcript;
+      _pendingAudioPath = null;
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+      if (!mounted) return;
+      setState(() => _transcribing = false);
+      _resumeTimer();
+      await _showAnswerSheet();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _transcribing = false;
+        _error = error.toString();
+      });
+    }
   }
 
   Future<void> _showAnswerSheet() async {
@@ -347,21 +400,26 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     setState(() {
       _submitting = true;
       _error = null;
+      _pendingRequestId ??= _createRequestId(question.id);
     });
     try {
-      final result = await ref
-          .read(apiClientProvider)
-          .submitAnswer(
-            question.id,
-            _sessionId!,
-            text,
-            parentAnswerId: _parentAnswerId,
-            elapsedSeconds: _elapsedSeconds,
-          );
+      final result = await _withAutomaticRetry(
+        () => ref
+            .read(apiClientProvider)
+            .submitAnswer(
+              question.id,
+              _sessionId!,
+              text,
+              parentAnswerId: _parentAnswerId,
+              requestId: _pendingRequestId,
+              elapsedSeconds: _elapsedSeconds,
+            ),
+      );
       if (!mounted) return;
       setState(() {
         _turns[question.id] = [...?_turns[question.id], result];
         _answer.clear();
+        _pendingRequestId = null;
         _pendingAnswer = result;
       });
       await _advanceAfterAnswer(result);
@@ -371,8 +429,12 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
         _submitting = false;
         _error = error.toString();
       });
-      _resumeTimer();
     }
+  }
+
+  String _createRequestId(String questionId) {
+    final nonce = Random.secure().nextInt(1 << 32);
+    return '${_sessionId}_${questionId}_${DateTime.now().microsecondsSinceEpoch}_$nonce';
   }
 
   Future<void> _advanceAfterAnswer(JuryAnswer answer) async {
@@ -397,13 +459,15 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
     }
 
     try {
-      final questions = await ref
-          .read(apiClientProvider)
-          .generateQuestions(
-            widget.projectId,
-            sessionId: _sessionId,
-            count: _questions.length + 1,
-          );
+      final questions = await _withAutomaticRetry(
+        () => ref
+            .read(apiClientProvider)
+            .generateQuestions(
+              widget.projectId,
+              sessionId: _sessionId,
+              count: _questions.length + 1,
+            ),
+      );
       if (!mounted) return;
       if (questions.length <= _questions.length) {
         throw StateError('AI评委暂时没有生成下一道有效问题');
@@ -429,6 +493,14 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   Future<void> _retry() async {
     if (_loading || _submitting || _finishing) return;
     setState(() => _error = null);
+    if (_pendingAudioPath != null) {
+      await _transcribePendingAudio();
+      return;
+    }
+    if (_pendingRequestId != null) {
+      await _submitAnswer();
+      return;
+    }
     if (_pendingFinish) {
       await _finish(announce: false);
       return;
@@ -466,7 +538,9 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
         await _tts.speak('本次答辩结束。');
         if (mounted) setState(() => _speaking = false);
       }
-      await ref.read(apiClientProvider).analyzeSession(_sessionId!);
+      await _withAutomaticRetry(
+        () => ref.read(apiClientProvider).analyzeSession(_sessionId!),
+      );
       if (mounted) context.go('/reports/${_sessionId!}');
     } catch (error) {
       if (!mounted) return;
@@ -510,6 +584,9 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   }
 
   String get _statusText {
+    if (_automaticRetryAttempt > 0) {
+      return 'AI服务暂时未完成请求，正在自动重试（$_automaticRetryAttempt/$_maxAutomaticRetries）';
+    }
     if (_finishing) return _speaking ? '评委宣布结束' : '正在生成综合报告';
     if (_loading) return '评委正在阅读材料与现场陈述';
     if (_transcribing) return '正在识别回答';
@@ -521,7 +598,13 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final busy = _loading || _transcribing || _submitting || _finishing;
+    final busy =
+        _loading ||
+        _transcribing ||
+        _submitting ||
+        _finishing ||
+        _automaticRetryAttempt > 0 ||
+        _error != null;
     return PopScope(
       canPop: !_recording && !busy,
       child: Scaffold(

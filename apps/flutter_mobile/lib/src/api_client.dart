@@ -331,6 +331,7 @@ class ApiClient {
     String sessionId,
     String text, {
     String? parentAnswerId,
+    String? requestId,
     int? elapsedSeconds,
   }) async {
     final response = await _authorized(
@@ -340,6 +341,7 @@ class ApiClient {
           'session_id': sessionId,
           'answer_text': text,
           'parent_answer_id': parentAnswerId,
+          if (requestId != null) 'request_id': requestId,
           if (elapsedSeconds != null) 'elapsed_seconds': elapsedSeconds,
         },
       ),

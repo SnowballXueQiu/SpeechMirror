@@ -60,9 +60,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('retries question generation without exposing finish action', (
-    tester,
-  ) async {
+  testWidgets('automatically retries question generation', (tester) async {
     tester.view.physicalSize = const Size(800, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -80,22 +78,41 @@ void main() {
         ),
       ),
     );
-    await _pumpAsync(tester);
-
-    expect(find.text('AI服务暂时未完成请求，请稍后重试'), findsOneWidget);
-    expect(find.text('重试'), findsOneWidget);
-
-    await tester.tap(find.text('重试'));
-    await _pumpAsync(tester);
+    await _pumpAsync(tester, cycles: 60);
 
     expect(find.text('为什么选择端云协同架构？'), findsOneWidget);
     expect(api.generationAttempts, 2);
+    expect(find.text('重试'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shows manual retry only after five automatic retries fail', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FailingJuryApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: const MaterialApp(
+          home: JuryScreen(projectId: 'project-1', sessionId: 'session-1'),
+        ),
+      ),
+    );
+    await _pumpAsync(tester, cycles: 220);
+
+    expect(api.generationAttempts, 6);
+    expect(find.text('AI服务暂时未完成请求，请稍后重试'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
 
-Future<void> _pumpAsync(WidgetTester tester) async {
-  for (var index = 0; index < 24; index += 1) {
+Future<void> _pumpAsync(WidgetTester tester, {int cycles = 24}) async {
+  for (var index = 0; index < cycles; index += 1) {
     await tester.pump(const Duration(milliseconds: 20));
   }
 }
@@ -141,6 +158,7 @@ class _JuryApiClient extends ApiClient {
     String sessionId,
     String text, {
     String? parentAnswerId,
+    String? requestId,
     int? elapsedSeconds,
   }) async {
     sessionIds.add(sessionId);
@@ -182,5 +200,20 @@ class _RetryingJuryApiClient extends _JuryApiClient {
       count: count,
       regenerate: regenerate,
     );
+  }
+}
+
+class _FailingJuryApiClient extends _JuryApiClient {
+  int generationAttempts = 0;
+
+  @override
+  Future<List<JuryQuestion>> generateQuestions(
+    String projectId, {
+    String? sessionId,
+    int count = 5,
+    bool regenerate = false,
+  }) async {
+    generationAttempts += 1;
+    throw const ApiException('AI服务暂时未完成请求，请稍后重试');
   }
 }
