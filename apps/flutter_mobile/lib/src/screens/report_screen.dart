@@ -102,26 +102,6 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               summary: report.qa.summary,
             ),
             const SizedBox(height: 26),
-            const SectionLabel('材料依据'),
-            const SizedBox(height: 12),
-            if (report.content.evidence.isEmpty && report.qa.evidence.isEmpty)
-              const Text(
-                '本次内容评价未返回可展示的材料片段。',
-                style: TextStyle(color: AppColors.muted),
-              )
-            else ...[
-              if (report.content.evidence.isNotEmpty)
-                const _EvidenceGroupLabel('陈述评价依据'),
-              for (final item in report.content.evidence)
-                _EvidenceQuote(item: item),
-              if (report.qa.evidence.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                const _EvidenceGroupLabel('问答评价依据'),
-                for (final item in report.qa.evidence)
-                  _EvidenceQuote(item: item),
-              ],
-            ],
-            const SizedBox(height: 26),
             const SectionLabel('重点改进'),
             const SizedBox(height: 12),
             if (report.suggestions.isEmpty)
@@ -129,11 +109,42 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
             else
               for (var i = 0; i < report.suggestions.length; i++)
                 _Suggestion(index: i + 1, text: report.suggestions[i]),
+            const SizedBox(height: 18),
+            _CollapsedReportSection(
+              title: '材料依据',
+              child:
+                  report.content.evidence.isEmpty && report.qa.evidence.isEmpty
+                  ? const Text(
+                      '本次内容评价未返回可展示的材料片段。',
+                      style: TextStyle(color: AppColors.muted),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (report.content.evidence.isNotEmpty)
+                          const _EvidenceGroupLabel('陈述评价依据'),
+                        for (final item in report.content.evidence)
+                          _EvidenceQuote(item: item),
+                        if (report.qa.evidence.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          const _EvidenceGroupLabel('问答评价依据'),
+                          for (final item in report.qa.evidence)
+                            _EvidenceQuote(item: item),
+                        ],
+                      ],
+                    ),
+            ),
             if (report.timeline.isNotEmpty) ...[
-              const SizedBox(height: 26),
-              const SectionLabel('时间定位'),
-              const SizedBox(height: 12),
-              for (final item in report.timeline) _TimelineRow(item: item),
+              const SizedBox(height: 8),
+              _CollapsedReportSection(
+                title: '时间定位',
+                child: Column(
+                  children: [
+                    for (final item in report.timeline)
+                      _TimelineRow(item: item),
+                  ],
+                ),
+              ),
             ],
             const SizedBox(height: 24),
             OutlinedButton.icon(
@@ -153,6 +164,27 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       _report = report;
     });
   }
+}
+
+class _CollapsedReportSection extends StatelessWidget {
+  const _CollapsedReportSection({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Theme(
+    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+    child: ExpansionTile(
+      initiallyExpanded: false,
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(top: 10, bottom: 6),
+      iconColor: AppColors.ink,
+      collapsedIconColor: AppColors.muted,
+      title: SectionLabel(title),
+      children: [Align(alignment: Alignment.centerLeft, child: child)],
+    ),
+  );
 }
 
 class _OverallScore extends StatelessWidget {
