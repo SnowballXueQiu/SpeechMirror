@@ -50,6 +50,67 @@ pub struct TokenPair {
     pub expires_in: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UserProfileResponse {
+    pub id: String,
+    pub username: String,
+    pub bio: Option<String>,
+    pub identity: Option<String>,
+    pub identity_other: Option<String>,
+    pub scenario: Option<String>,
+    pub scenario_other: Option<String>,
+    pub purposes: Vec<String>,
+    pub purpose_other: Option<String>,
+    pub onboarding_completed: bool,
+    pub research_consent: bool,
+    pub has_avatar: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateUserProfileRequest {
+    pub bio: Option<String>,
+    pub identity: Option<String>,
+    pub identity_other: Option<String>,
+    pub scenario: Option<String>,
+    pub scenario_other: Option<String>,
+    #[serde(default)]
+    pub purposes: Vec<String>,
+    pub purpose_other: Option<String>,
+    pub onboarding_completed: bool,
+    #[serde(default)]
+    pub research_consent: bool,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RecordActivityRequest {
+    pub local_date: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ActivityQuery {
+    pub through: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ActivityDayResponse {
+    pub date: String,
+    pub use_count: i32,
+    pub practice_count: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ActivitySummaryResponse {
+    pub through: String,
+    pub active_days: usize,
+    pub total_uses: i32,
+    pub total_practices: i32,
+    pub current_streak: usize,
+    pub longest_streak: usize,
+    pub days: Vec<ActivityDayResponse>,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateProjectRequest {
     pub name: String,
@@ -101,6 +162,7 @@ pub struct CreateSessionRequest {
     pub title: Option<String>,
     pub target_seconds: Option<i32>,
     pub local_video_ref: Option<String>,
+    pub local_date: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

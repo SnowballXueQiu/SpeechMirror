@@ -5,7 +5,43 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(InitialSchema)]
+        vec![Box::new(InitialSchema), Box::new(UserProfileSchema)]
+    }
+}
+
+struct UserProfileSchema;
+
+#[async_trait::async_trait]
+impl MigrationName for UserProfileSchema {
+    fn name(&self) -> &str {
+        "m20260929_000002_user_profiles"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for UserProfileSchema {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        for statement in [
+            "CREATE TABLE IF NOT EXISTS user_profiles (user_id TEXT PRIMARY KEY NOT NULL, bio TEXT, identity TEXT, identity_other TEXT, scenario TEXT, scenario_other TEXT, purposes_json JSON NOT NULL DEFAULT '[]', purpose_other TEXT, onboarding_completed INTEGER NOT NULL DEFAULT 0, research_consent INTEGER NOT NULL DEFAULT 0, avatar_bytes BLOB, avatar_media_type TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)",
+            "CREATE TABLE IF NOT EXISTS user_activity_days (user_id TEXT NOT NULL, activity_date TEXT NOT NULL, use_count INTEGER NOT NULL DEFAULT 0, practice_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY(user_id, activity_date), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)",
+            "CREATE INDEX IF NOT EXISTS idx_activity_user_date ON user_activity_days(user_id, activity_date)",
+        ] {
+            manager
+                .get_connection()
+                .execute_unprepared(statement)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        for table in ["user_activity_days", "user_profiles"] {
+            manager
+                .get_connection()
+                .execute_unprepared(&format!("DROP TABLE IF EXISTS {table}"))
+                .await?;
+        }
+        Ok(())
     }
 }
 

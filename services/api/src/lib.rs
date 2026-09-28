@@ -6,6 +6,7 @@ pub mod entities;
 pub mod error;
 pub mod migration;
 pub mod models;
+pub mod profile;
 pub mod providers;
 pub mod routes;
 pub mod workers;
@@ -453,6 +454,139 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn profile_onboarding_and_activity_flow() {
+        let temp = tempdir().unwrap();
+        let router = app(Config::test(temp.path().to_owned())).await.unwrap();
+        let registered = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"profile_owner","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        let registered: Value =
+            serde_json::from_slice(&registered.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let token = registered["access_token"].as_str().unwrap();
+
+        let profile = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(profile.status(), StatusCode::OK);
+        let profile: Value =
+            serde_json::from_slice(&profile.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(profile["username"], "profile_owner");
+        assert_eq!(profile["onboarding_completed"], false);
+
+        let updated = router
+            .clone()
+            .oneshot(json_request_with_method(
+                Method::PUT,
+                "/api/v1/me",
+                json!({
+                    "bio":"  专注于智能答辩训练  ",
+                    "identity":"本科生",
+                    "scenario":"创新创业大赛",
+                    "purposes":["提升表达", "准备评委提问"],
+                    "onboarding_completed":true,
+                    "research_consent":true
+                }),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(updated.status(), StatusCode::OK);
+        let updated: Value =
+            serde_json::from_slice(&updated.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(updated["bio"], "专注于智能答辩训练");
+        assert_eq!(updated["identity"], "本科生");
+        assert_eq!(updated["research_consent"], true);
+
+        let invalid = router
+            .clone()
+            .oneshot(json_request_with_method(
+                Method::PUT,
+                "/api/v1/me",
+                json!({
+                    "identity":"外星访客",
+                    "purposes":[],
+                    "onboarding_completed":true
+                }),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let activity = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/me/activity",
+                json!({"local_date":today}),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(activity.status(), StatusCode::OK);
+
+        let project = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/projects",
+                json!({"name":"活跃统计测试","defense_duration_seconds":300}),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        let project: Value =
+            serde_json::from_slice(&project.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let project_id = project["id"].as_str().unwrap();
+        let session = router
+            .clone()
+            .oneshot(json_request(
+                &format!("/api/v1/projects/{project_id}/sessions"),
+                json!({"target_seconds":300,"local_date":today}),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(session.status(), StatusCode::OK);
+
+        let summary = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/me/activity?through={today}"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(summary.status(), StatusCode::OK);
+        let summary: Value =
+            serde_json::from_slice(&summary.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(summary["active_days"], 1);
+        assert_eq!(summary["total_uses"], 1);
+        assert_eq!(summary["total_practices"], 1);
+        assert_eq!(summary["current_streak"], 1);
     }
 
     #[tokio::test]

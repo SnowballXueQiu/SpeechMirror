@@ -17,6 +17,49 @@ pub mod user {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod user_profile {
+    use super::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "user_profiles")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: String,
+        pub bio: Option<String>,
+        pub identity: Option<String>,
+        pub identity_other: Option<String>,
+        pub scenario: Option<String>,
+        pub scenario_other: Option<String>,
+        pub purposes_json: Json,
+        pub purpose_other: Option<String>,
+        pub onboarding_completed: bool,
+        pub research_consent: bool,
+        pub avatar_bytes: Option<Vec<u8>>,
+        pub avatar_media_type: Option<String>,
+        pub updated_at: DateTimeUtc,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod user_activity_day {
+    use super::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "user_activity_days")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: String,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub activity_date: String,
+        pub use_count: i32,
+        pub practice_count: i32,
+        pub updated_at: DateTimeUtc,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod refresh_token {
     use super::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]

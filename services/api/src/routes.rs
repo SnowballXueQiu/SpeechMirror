@@ -28,6 +28,7 @@ use crate::{
     },
     error::{ApiError, ApiResult},
     models::*,
+    profile,
     workers::{
         enqueue_document_ingestion, enqueue_report_generation, enqueue_session_asr, wait_for_job,
     },
@@ -40,6 +41,7 @@ pub fn api_router(state: AppState) -> Router {
         .route("/auth/login", post(login))
         .route("/auth/refresh", post(refresh));
     let protected = Router::new()
+        .merge(profile::routes())
         .route("/auth/logout", post(logout))
         .route("/projects", get(list_projects).post(create_project))
         .route(
@@ -460,10 +462,17 @@ async fn create_session(
             "target duration must be 30-1800 seconds".into(),
         ));
     }
+    let activity_date = body
+        .local_date
+        .as_deref()
+        .map(profile::validate_local_date)
+        .transpose()?
+        .unwrap_or_else(|| Utc::now().date_naive());
+    let user_id = user.id;
     let model = rehearsal_session::ActiveModel {
         id: Set(Uuid::new_v4().to_string()),
         project_id: Set(project_id),
-        user_id: Set(user.id),
+        user_id: Set(user_id.clone()),
         title: Set(body
             .title
             .unwrap_or_else(|| format!("第{}次训练", Utc::now().format("%m%d-%H%M")))),
@@ -477,6 +486,9 @@ async fn create_session(
     }
     .insert(&state.db)
     .await?;
+    if let Err(error) = profile::increment_activity(&state, &user_id, &activity_date, 0, 1).await {
+        tracing::warn!(%error, %user_id, "failed to record practice activity");
+    }
     Ok(Json(session_response(model)))
 }
 
