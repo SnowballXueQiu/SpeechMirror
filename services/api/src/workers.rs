@@ -87,9 +87,16 @@ pub async fn wait_for_job(state: &AppState, job_id: &str) -> ApiResult<Value> {
         match job.status.as_str() {
             "completed" => return Ok(job.result_json.unwrap_or_else(|| json!({}))),
             "failed" => {
-                return Err(ApiError::Internal(
-                    job.error.unwrap_or_else(|| "background job failed".into()),
-                ));
+                let message = job.error.unwrap_or_else(|| "background job failed".into());
+                let error_code = job
+                    .result_json
+                    .as_ref()
+                    .and_then(|value| value.get("error_code"))
+                    .and_then(Value::as_str);
+                return Err(match error_code {
+                    Some("bad_request") => ApiError::BadRequest(message),
+                    _ => ApiError::Internal(message),
+                });
             }
             _ if tokio::time::Instant::now() >= deadline => {
                 return Err(ApiError::Internal(
@@ -184,6 +191,10 @@ async fn run_job(state: &AppState, job: analysis_job::Model) {
             active.result_json = Set(result_json);
         }
         Err(error) => {
+            let error_code = match &error {
+                ApiError::BadRequest(_) => Some("bad_request"),
+                _ => None,
+            };
             let message: String = error.to_string().chars().take(1000).collect();
             tracing::error!(job_id = %job.id, resource_id = %job.resource_id, %message, "background job failed");
             if job.kind == "document_ingestion" {
@@ -191,7 +202,7 @@ async fn run_job(state: &AppState, job: analysis_job::Model) {
             }
             active.status = Set("failed".into());
             active.error = Set(Some(message));
-            active.result_json = Set(None);
+            active.result_json = Set(error_code.map(|code| json!({"error_code": code})));
         }
     }
     if let Err(error) = active.update(&state.db).await {

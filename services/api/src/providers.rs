@@ -178,7 +178,7 @@ impl AiClient {
                 response_shape = %json_shape(&body, 0),
                 "ASR response did not contain transcript text"
             );
-            ApiError::Internal("ASR response did not contain transcript text".into())
+            ApiError::BadRequest("未识别到有效语音，请重新录制并确认麦克风权限正常".into())
         })
     }
 

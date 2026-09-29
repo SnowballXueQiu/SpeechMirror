@@ -341,6 +341,63 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     }
   }
 
+  Future<void> _confirmRerecord() async {
+    final pending = _pendingTraining;
+    if (pending == null || _processing) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重新录制项目陈述？'),
+        content: const Text('当前未提交成功的本地录音和录像将被删除，然后重新打开摄像头。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('重新录制'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _processing = true;
+      _processingLabel = '正在重新准备';
+      _processError = null;
+    });
+    try {
+      await ref.read(pendingTrainingStoreProvider).delete(widget.projectId);
+      for (final path in [pending.audioPath, pending.videoPath]) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+      await _camera?.dispose();
+      _camera = null;
+      await _audioRecorder?.dispose();
+      _audioRecorder = null;
+      if (!mounted) return;
+      setState(() {
+        _pendingTraining = null;
+        _session = null;
+        _audioPath = null;
+        _elapsedSeconds = 0;
+        _processing = false;
+        _initializing = true;
+      });
+      await _initialize();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _processError = '重新录制准备失败：$error';
+        _processing = false;
+        _initializing = false;
+      });
+    }
+  }
+
   Future<void> _releaseCameraForTransition() async {
     final camera = _camera;
     _camera = null;
@@ -426,6 +483,9 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                               onRetry: _pendingTraining != null
                                   ? _submitForAnalysis
                                   : _start,
+                              onRerecord: _pendingTraining != null
+                                  ? _confirmRerecord
+                                  : null,
                             ),
                             const SizedBox(height: 10),
                           ],
@@ -688,10 +748,15 @@ class _PrimaryCallAction extends StatelessWidget {
 }
 
 class _TrainingErrorBanner extends StatelessWidget {
-  const _TrainingErrorBanner({required this.message, required this.onRetry});
+  const _TrainingErrorBanner({
+    required this.message,
+    required this.onRetry,
+    this.onRerecord,
+  });
 
   final String message;
   final VoidCallback onRetry;
+  final VoidCallback? onRerecord;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -700,21 +765,41 @@ class _TrainingErrorBanner extends StatelessWidget {
       color: const Color(0xE6451F1A),
       borderRadius: BorderRadius.circular(8),
     ),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Icon(Icons.error_outline, color: Colors.white, size: 20),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            message,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white),
-          ),
+        Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
         ),
-        TextButton(
-          onPressed: onRetry,
-          child: const Text('重试', style: TextStyle(color: Colors.white)),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton(
+              onPressed: onRetry,
+              child: const Text('重试', style: TextStyle(color: Colors.white)),
+            ),
+            if (onRerecord != null) ...[
+              const SizedBox(width: 4),
+              TextButton.icon(
+                onPressed: onRerecord,
+                icon: const Icon(Icons.replay_rounded, size: 18),
+                label: const Text('重新录制'),
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+              ),
+            ],
+          ],
         ),
       ],
     ),
