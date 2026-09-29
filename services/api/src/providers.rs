@@ -173,14 +173,13 @@ impl AiClient {
             .await
             .map_err(internal)?;
         let body = checked_json(response).await?;
-        body.pointer("/choices/0/message/content")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-            .ok_or_else(|| {
-                ApiError::Internal("ASR response did not contain transcript text".into())
-            })
+        extract_transcript(&body).ok_or_else(|| {
+            tracing::warn!(
+                response_shape = %json_shape(&body, 0),
+                "ASR response did not contain transcript text"
+            );
+            ApiError::Internal("ASR response did not contain transcript text".into())
+        })
     }
 
     pub async fn ocr_image(&self, path: &Path, media_type: &str) -> ApiResult<String> {
@@ -288,6 +287,78 @@ fn parse_json_content(content: &str) -> ApiResult<Value> {
     serde_json::from_str(without_fence).map_err(ApiError::from)
 }
 
+fn extract_transcript(body: &Value) -> Option<String> {
+    const PATHS: [&str; 8] = [
+        "/choices/0/message/audio/transcript",
+        "/choices/0/message/transcript",
+        "/choices/0/message/content",
+        "/choices/0/text",
+        "/output/transcript",
+        "/output/text",
+        "/transcript",
+        "/text",
+    ];
+
+    PATHS
+        .iter()
+        .filter_map(|path| body.pointer(path))
+        .find_map(transcript_from_value)
+}
+
+fn transcript_from_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => non_empty_text(text),
+        Value::Array(items) => {
+            let text = items
+                .iter()
+                .filter_map(transcript_from_content_item)
+                .collect::<Vec<_>>()
+                .join("\n");
+            non_empty_text(&text)
+        }
+        Value::Object(_) => transcript_from_content_item(value),
+        _ => None,
+    }
+}
+
+fn transcript_from_content_item(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return non_empty_text(text);
+    }
+    ["transcript", "text", "content"]
+        .iter()
+        .filter_map(|key| value.get(key))
+        .find_map(transcript_from_value)
+}
+
+fn non_empty_text(text: &str) -> Option<String> {
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+fn json_shape(value: &Value, depth: usize) -> Value {
+    if depth >= 5 {
+        return Value::String("...".into());
+    }
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| (key.clone(), json_shape(value, depth + 1)))
+                .collect(),
+        ),
+        Value::Array(items) => json!({
+            "type": "array",
+            "length": items.len(),
+            "item": items.first().map(|item| json_shape(item, depth + 1))
+        }),
+        Value::Null => Value::String("null".into()),
+        Value::Bool(_) => Value::String("boolean".into()),
+        Value::Number(_) => Value::String("number".into()),
+        Value::String(_) => Value::String("string".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +402,56 @@ mod tests {
         assert!(retryable_status(StatusCode::TOO_MANY_REQUESTS));
         assert!(!retryable_status(StatusCode::BAD_REQUEST));
         assert!(!retryable_status(StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn extracts_transcript_from_string_content() {
+        let body = json!({
+            "choices": [{"message": {"content": "  这是转写文本。  "}}]
+        });
+
+        assert_eq!(extract_transcript(&body).as_deref(), Some("这是转写文本。"));
+    }
+
+    #[test]
+    fn extracts_transcript_from_content_items() {
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "第一段"},
+                        {"type": "transcript", "transcript": "第二段"}
+                    ]
+                }
+            }]
+        });
+
+        assert_eq!(extract_transcript(&body).as_deref(), Some("第一段\n第二段"));
+    }
+
+    #[test]
+    fn extracts_transcript_from_audio_object() {
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "content": null,
+                    "audio": {"id": "audio-1", "transcript": "语音对象中的转写"}
+                }
+            }]
+        });
+
+        assert_eq!(
+            extract_transcript(&body).as_deref(),
+            Some("语音对象中的转写")
+        );
+    }
+
+    #[test]
+    fn extracts_transcript_from_top_level_output() {
+        assert_eq!(
+            extract_transcript(&json!({"output": {"text": "输出文本"}})).as_deref(),
+            Some("输出文本")
+        );
+        assert!(extract_transcript(&json!({"choices": []})).is_none());
     }
 }
