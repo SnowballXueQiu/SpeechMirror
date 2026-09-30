@@ -10,7 +10,9 @@ final authControllerProvider = ChangeNotifierProvider<AuthController>(
 );
 
 class AuthController extends ChangeNotifier {
-  AuthController(this._api);
+  AuthController(this._api) {
+    _api.onSessionExpired = _handleSessionExpired;
+  }
   final ApiClient _api;
   bool initialized = false;
   bool authenticated = false;
@@ -61,6 +63,16 @@ class AuthController extends ChangeNotifier {
     authenticated = false;
     profile = null;
     _activityRecorded = false;
+    notifyListeners();
+  }
+
+  void _handleSessionExpired() {
+    authenticated = false;
+    profile = null;
+    busy = false;
+    error = null;
+    _activityRecorded = false;
+    initialized = true;
     notifyListeners();
   }
 

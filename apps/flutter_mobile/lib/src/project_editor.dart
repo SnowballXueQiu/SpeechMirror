@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'models.dart';
+import 'theme.dart';
+import 'widgets.dart';
 
 class ProjectDraft {
   const ProjectDraft({
@@ -17,21 +19,21 @@ class ProjectDraft {
 Future<ProjectDraft?> showProjectEditor(
   BuildContext context, {
   Project? project,
-}) => showDialog<ProjectDraft>(
-  context: context,
-  builder: (context) => _ProjectEditorDialog(project: project),
+}) => showAppSheet<ProjectDraft>(
+  context,
+  builder: (context) => _ProjectEditorSheet(project: project),
 );
 
-class _ProjectEditorDialog extends StatefulWidget {
-  const _ProjectEditorDialog({this.project});
+class _ProjectEditorSheet extends StatefulWidget {
+  const _ProjectEditorSheet({this.project});
 
   final Project? project;
 
   @override
-  State<_ProjectEditorDialog> createState() => _ProjectEditorDialogState();
+  State<_ProjectEditorSheet> createState() => _ProjectEditorSheetState();
 }
 
-class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
+class _ProjectEditorSheetState extends State<_ProjectEditorSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _description;
@@ -53,58 +55,143 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.project == null ? '新建答辩项目' : '编辑答辩项目'),
-    content: Form(
-      key: _formKey,
-      child: SingleChildScrollView(
-        child: SizedBox(
-          width: 420,
+  Widget build(BuildContext context) => AnimatedPadding(
+    duration: const Duration(milliseconds: 180),
+    curve: Curves.easeOutCubic,
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+    child: AppSheet(
+      title: widget.project == null ? '新建答辩项目' : '编辑答辩项目',
+      subtitle: '设置名称、简介和项目陈述时长',
+      icon: widget.project == null ? Icons.add_rounded : Icons.edit_outlined,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const _FieldLabel('项目名称'),
+              const SizedBox(height: 8),
               TextFormField(
                 controller: _name,
                 autofocus: true,
                 maxLength: 80,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: '项目名称'),
+                decoration: const InputDecoration(
+                  hintText: '例如：SpeechMirror AI答辩教练',
+                  counterText: '',
+                ),
                 validator: (value) =>
                     (value?.trim().isEmpty ?? true) ? '请输入项目名称' : null,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
+              const _FieldLabel('项目简介'),
+              const SizedBox(height: 8),
               TextFormField(
                 controller: _description,
-                maxLines: 3,
+                minLines: 2,
+                maxLines: 4,
                 maxLength: 500,
-                decoration: const InputDecoration(labelText: '一句话说明'),
+                textInputAction: TextInputAction.newline,
+                decoration: const InputDecoration(
+                  hintText: '用一两句话说明项目解决的问题',
+                  alignLabelWithHint: true,
+                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 9, 9, 9),
+                decoration: BoxDecoration(
+                  color: AppColors.paper,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '目标时长',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            '项目陈述的参考时间',
+                            style: TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '减少一分钟',
+                      onPressed: _minutes > 1
+                          ? () => setState(() => _minutes--)
+                          : null,
+                      style: IconButton.styleFrom(
+                        fixedSize: const Size.square(36),
+                        backgroundColor: AppColors.white,
+                        side: const BorderSide(color: AppColors.line),
+                      ),
+                      icon: const Icon(Icons.remove_rounded, size: 18),
+                    ),
+                    SizedBox(
+                      width: 68,
+                      child: Text(
+                        '$_minutes 分钟',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '增加一分钟',
+                      onPressed: _minutes < 30
+                          ? () => setState(() => _minutes++)
+                          : null,
+                      style: IconButton.styleFrom(
+                        fixedSize: const Size.square(36),
+                        backgroundColor: AppColors.ink,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
               Row(
                 children: [
-                  const Text('目标时长'),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: '减少一分钟',
-                    onPressed: _minutes > 1
-                        ? () => setState(() => _minutes--)
-                        : null,
-                    icon: const Icon(Icons.remove),
-                  ),
-                  SizedBox(
-                    width: 72,
-                    child: Text(
-                      '$_minutes 分钟',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('取消'),
                     ),
                   ),
-                  IconButton(
-                    tooltip: '增加一分钟',
-                    onPressed: _minutes < 30
-                        ? () => setState(() => _minutes++)
-                        : null,
-                    icon: const Icon(Icons.add),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton(
+                      onPressed: _submit,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            widget.project == null
+                                ? Icons.add_rounded
+                                : Icons.check_rounded,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(widget.project == null ? '创建项目' : '保存'),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -113,16 +200,6 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
         ),
       ),
     ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        onPressed: _submit,
-        child: Text(widget.project == null ? '创建' : '保存'),
-      ),
-    ],
   );
 
   void _submit() {
@@ -137,4 +214,20 @@ class _ProjectEditorDialogState extends State<_ProjectEditorDialog> {
       ),
     );
   }
+}
+
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text,
+    style: const TextStyle(
+      color: AppColors.ink,
+      fontSize: 13,
+      fontWeight: FontWeight.w700,
+    ),
+  );
 }

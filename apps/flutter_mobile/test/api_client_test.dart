@@ -91,6 +91,51 @@ void main() {
     },
   );
 
+  test('clears an expired session and notifies the app once', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://speechmirror.test/api/v1'));
+    final storage = MemoryTokenStore({
+      'access_token': 'expired-access',
+      'refresh_token': 'expired-refresh',
+    });
+    var expirationNotifications = 0;
+
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) => handler.reject(
+          DioException(
+            requestOptions: options,
+            type: DioExceptionType.badResponse,
+            response: Response<Map<String, dynamic>>(
+              requestOptions: options,
+              statusCode: 401,
+              data: const {
+                'code': 'unauthorized',
+                'message': 'authentication required',
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final client = ApiClient(dio: dio, storage: storage)
+      ..onSessionExpired = () => expirationNotifications += 1;
+    expect(await client.restoreSession(), isTrue);
+
+    await expectLater(
+      client.listProjects(),
+      throwsA(isA<AuthenticationRequiredException>()),
+    );
+    await expectLater(
+      client.listProjects(),
+      throwsA(isA<AuthenticationRequiredException>()),
+    );
+
+    expect(expirationNotifications, 1);
+    expect(await storage.read('access_token'), isNull);
+    expect(await storage.read('refresh_token'), isNull);
+  });
+
   test(
     'updates and deletes a project with the authenticated contract',
     () async {

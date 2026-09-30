@@ -170,31 +170,33 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _changeAvatar() async {
     final profile = ref.read(authControllerProvider).profile!;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('头像', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => Navigator.pop(context, 'choose'),
-                icon: const Icon(Icons.photo_library_outlined),
-                label: Text(profile.hasAvatar ? '更换头像' : '选择头像'),
-              ),
-              if (profile.hasAvatar)
-                TextButton.icon(
-                  onPressed: () => Navigator.pop(context, 'delete'),
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  label: const Text('移除当前头像'),
+    final action = await showAppSheet<String>(
+      context,
+      builder: (sheetContext) => AppSheet(
+        title: '个人头像',
+        subtitle: '支持 PNG、JPG 或 JPEG 图片',
+        icon: Icons.person_outline_rounded,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(sheetContext, 'choose'),
+              icon: const Icon(Icons.photo_library_outlined),
+              label: Text(profile.hasAvatar ? '更换头像' : '选择头像'),
+            ),
+            if (profile.hasAvatar) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.vermilion,
                 ),
+                onPressed: () => Navigator.pop(sheetContext, 'delete'),
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: const Text('移除当前头像'),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -221,10 +223,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _editBio(UserProfile profile) async {
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
+    final result = await showAppSheet<String>(
+      context,
       builder: (context) => _BioEditorSheet(initialValue: profile.bio ?? ''),
     );
     if (result == null) return;
@@ -462,33 +462,34 @@ class _BioEditorSheetState extends State<_BioEditorSheet> {
   }
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.fromLTRB(
-      20,
-      4,
-      20,
-      MediaQuery.viewInsetsOf(context).bottom + 20,
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('个人简介', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _controller,
-          autofocus: true,
-          maxLength: 200,
-          maxLines: 4,
-          minLines: 2,
-          decoration: const InputDecoration(hintText: '简单介绍你的方向或正在准备的答辩'),
-        ),
-        const SizedBox(height: 8),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _controller.text.trim()),
-          child: const Text('保存'),
-        ),
-      ],
+  Widget build(BuildContext context) => AnimatedPadding(
+    duration: const Duration(milliseconds: 180),
+    curve: Curves.easeOutCubic,
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+    child: AppSheet(
+      title: '个人简介',
+      subtitle: '展示你的方向或正在准备的答辩',
+      icon: Icons.notes_rounded,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLength: 200,
+            maxLines: 4,
+            minLines: 2,
+            decoration: const InputDecoration(hintText: '输入个人简介'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, _controller.text.trim()),
+            icon: const Icon(Icons.check_rounded),
+            label: const Text('保存简介'),
+          ),
+        ],
+      ),
     ),
   );
 }

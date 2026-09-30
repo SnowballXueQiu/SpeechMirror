@@ -311,39 +311,22 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
 
   Future<void> _showAnswerSheet() async {
     if (!mounted || _submitting || _finishing) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.paper,
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          16,
-          20,
-          MediaQuery.viewInsetsOf(sheetContext).bottom + 18,
+    await showAppSheet<void>(
+      context,
+      builder: (sheetContext) => AnimatedPadding(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
         ),
-        child: SafeArea(
-          top: false,
+        child: AppSheet(
+          title: '确认回答',
+          subtitle: '提交前检查语音转写内容',
+          icon: Icons.mic_none_rounded,
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  const Text(
-                    '确认回答',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: '收起键盘',
-                    onPressed: () =>
-                        FocusManager.instance.primaryFocus?.unfocus(),
-                    icon: const Icon(Icons.keyboard_hide_outlined),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
               TextField(
                 controller: _answer,
                 autofocus: _answer.text.isEmpty,
@@ -352,9 +335,17 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) =>
                     FocusManager.instance.primaryFocus?.unfocus(),
-                decoration: const InputDecoration(hintText: '输入或修改你的回答'),
+                decoration: InputDecoration(
+                  hintText: '输入或修改你的回答',
+                  suffixIcon: IconButton(
+                    tooltip: '收起键盘',
+                    onPressed: () =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
+                    icon: const Icon(Icons.keyboard_hide_outlined),
+                  ),
+                ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
@@ -365,13 +356,14 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
+                    flex: 2,
                     child: FilledButton.icon(
                       onPressed: () {
                         FocusManager.instance.primaryFocus?.unfocus();
                         Navigator.of(sheetContext).pop();
                         _submitAnswer();
                       },
-                      icon: const Icon(Icons.send_outlined),
+                      icon: const Icon(Icons.send_rounded),
                       label: const Text('提交回答'),
                     ),
                   ),
@@ -533,24 +525,15 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   }
 
   Future<void> _confirmManualEnd() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('结束本次答辩？'),
-        content: const Text('评委将停止提问并生成综合报告。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('继续答辩'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('结束答辩'),
-          ),
-        ],
-      ),
+    final confirmed = await showAppConfirmation(
+      context,
+      title: '结束本次答辩？',
+      message: '评委将停止提问并生成综合报告。',
+      confirmLabel: '结束答辩',
+      cancelLabel: '继续答辩',
+      icon: Icons.flag_outlined,
     );
-    if (confirmed == true) await _finish(announce: true);
+    if (confirmed) await _finish(announce: true);
   }
 
   @override

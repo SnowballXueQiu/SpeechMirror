@@ -211,19 +211,7 @@ class _Wordmark extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Container(
-        width: 27,
-        height: 27,
-        decoration: const BoxDecoration(
-          color: AppColors.ink,
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(
-          Icons.graphic_eq_rounded,
-          color: AppColors.signal,
-          size: 17,
-        ),
-      ),
+      const AppLogo(size: 30),
       const SizedBox(width: 10),
       const Text(
         '言镜',

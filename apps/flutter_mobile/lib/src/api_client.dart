@@ -12,6 +12,10 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+class AuthenticationRequiredException extends ApiException {
+  const AuthenticationRequiredException() : super('登录状态已失效，请重新登录');
+}
+
 abstract interface class TokenStore {
   Future<String?> read(String key);
   Future<void> write(String key, String value);
@@ -62,6 +66,8 @@ class ApiClient {
   String? _accessToken;
   String? _refreshToken;
   Future<bool>? _refreshInFlight;
+  bool _sessionExpirationNotified = false;
+  void Function()? onSessionExpired;
 
   Future<bool> restoreSession() async {
     try {
@@ -416,20 +422,30 @@ class ApiClient {
   Future<Response<T>> _authorized<T>(
     Future<Response<T>> Function() action,
   ) async {
+    if (_accessToken == null || _refreshToken == null) {
+      _notifySessionExpired();
+      throw const AuthenticationRequiredException();
+    }
     _dio.options.headers['authorization'] = 'Bearer $_accessToken';
-    return _call(action, retryAuth: true);
+    return _call(action, retryAuth: true, sessionBound: true);
   }
 
   Future<Response<T>> _call<T>(
     Future<Response<T>> Function() action, {
     required bool retryAuth,
+    bool sessionBound = false,
   }) async {
     try {
       return await action();
     } on DioException catch (error) {
-      if (retryAuth && error.response?.statusCode == 401 && await _refresh()) {
-        _dio.options.headers['authorization'] = 'Bearer $_accessToken';
-        return _call(action, retryAuth: false);
+      if (sessionBound && error.response?.statusCode == 401) {
+        if (retryAuth && await _refresh()) {
+          _dio.options.headers['authorization'] = 'Bearer $_accessToken';
+          return _call(action, retryAuth: false, sessionBound: true);
+        }
+        await _clearTokens();
+        _notifySessionExpired();
+        throw const AuthenticationRequiredException();
       }
       throw ApiException(_errorMessage(error));
     }
@@ -470,6 +486,7 @@ class ApiClient {
     _refreshToken = data['refresh_token'] as String;
     await _storage.write('access_token', _accessToken!);
     await _storage.write('refresh_token', _refreshToken!);
+    _sessionExpirationNotified = false;
   }
 
   Future<void> _clearTokens() async {
@@ -480,6 +497,12 @@ class ApiClient {
       _storage.delete('access_token'),
       _storage.delete('refresh_token'),
     ]);
+  }
+
+  void _notifySessionExpired() {
+    if (_sessionExpirationNotified) return;
+    _sessionExpirationNotified = true;
+    onSessionExpired?.call();
   }
 
   String _errorMessage(DioException error) {

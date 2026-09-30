@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:speechmirror/src/api_client.dart';
 import 'package:speechmirror/src/app.dart';
 import 'package:speechmirror/src/auth_controller.dart';
+import 'package:speechmirror/src/models.dart';
 import 'package:speechmirror/src/screens/auth_screen.dart';
 
 void main() {
@@ -75,6 +76,26 @@ void main() {
     expect(password.controller.text, 'correct-horse');
     expect(find.text('用户名或密码错误'), findsOneWidget);
   });
+
+  testWidgets('redirects to login when an active session expires', (
+    tester,
+  ) async {
+    final api = _ExpiringSessionApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: const SpeechMirrorApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('我的答辩'), findsOneWidget);
+    api.expireSession();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AuthScreen), findsOneWidget);
+    expect(find.text('欢迎回来'), findsOneWidget);
+  });
 }
 
 class _RejectingAuthApiClient extends ApiClient {
@@ -89,4 +110,29 @@ class _RejectingAuthApiClient extends ApiClient {
   }) async {
     throw const ApiException('用户名或密码错误');
   }
+}
+
+class _ExpiringSessionApiClient extends ApiClient {
+  @override
+  Future<bool> restoreSession() async => true;
+
+  @override
+  Future<UserProfile> getProfile() async => UserProfile(
+    id: 'user-1',
+    username: 'tester',
+    purposes: const [],
+    onboardingCompleted: true,
+    researchConsent: false,
+    hasAvatar: false,
+    createdAt: DateTime(2026),
+    updatedAt: DateTime(2026),
+  );
+
+  @override
+  Future<void> recordActivity([DateTime? now]) async {}
+
+  @override
+  Future<List<Project>> listProjects() async => const [];
+
+  void expireSession() => onSessionExpired?.call();
 }

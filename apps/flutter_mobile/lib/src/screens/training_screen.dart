@@ -15,6 +15,7 @@ import '../device_analysis.dart';
 import '../models.dart';
 import '../pending_training_store.dart';
 import '../theme.dart';
+import '../widgets.dart';
 
 final pendingTrainingStoreProvider = Provider<PendingTrainingStore>(
   (ref) => FilePendingTrainingStore(),
@@ -344,24 +345,14 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   Future<void> _confirmRerecord() async {
     final pending = _pendingTraining;
     if (pending == null || _processing) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('重新录制项目陈述？'),
-        content: const Text('当前未提交成功的本地录音和录像将被删除，然后重新打开摄像头。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('重新录制'),
-          ),
-        ],
-      ),
+    final confirmed = await showAppConfirmation(
+      context,
+      title: '重新录制项目陈述？',
+      message: '当前未提交成功的本地录音和录像将被删除，然后重新打开摄像头。',
+      confirmLabel: '重新录制',
+      icon: Icons.replay_rounded,
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
     setState(() {
       _processing = true;

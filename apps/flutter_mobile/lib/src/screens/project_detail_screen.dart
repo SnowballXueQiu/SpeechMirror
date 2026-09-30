@@ -74,7 +74,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
               context.push('/projects/${widget.projectId}/history'),
           icon: const Icon(Icons.history_rounded),
         ),
-        PopupMenuButton<_ProjectAction>(
+        AppMenuButton<_ProjectAction>(
           tooltip: '项目操作',
           enabled: !_mutating,
           onSelected: (action) {
@@ -85,30 +85,17 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
                 _deleteProject();
             }
           },
-          itemBuilder: (context) => const [
-            PopupMenuItem(
+          actions: const [
+            AppMenuAction(
               value: _ProjectAction.edit,
-              child: Row(
-                children: [
-                  Icon(Icons.edit_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('编辑项目'),
-                ],
-              ),
+              icon: Icons.edit_outlined,
+              label: '编辑项目',
             ),
-            PopupMenuItem(
+            AppMenuAction(
               value: _ProjectAction.delete,
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.delete_outline_rounded,
-                    size: 20,
-                    color: AppColors.vermilion,
-                  ),
-                  SizedBox(width: 12),
-                  Text('删除项目'),
-                ],
-              ),
+              icon: Icons.delete_outline_rounded,
+              label: '删除项目',
+              destructive: true,
             ),
           ],
         ),
@@ -247,29 +234,16 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
     try {
       final (project, _) = await _data;
       if (!mounted) return;
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('彻底删除项目？'),
-          content: Text('将删除“${project.name}”的材料、训练记录、报告和评委问答。此操作无法撤销。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton.icon(
-              key: const ValueKey('confirm-project-deletion'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-              ),
-              onPressed: () => Navigator.pop(context, true),
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('彻底删除'),
-            ),
-          ],
-        ),
+      final confirmed = await showAppConfirmation(
+        context,
+        title: '彻底删除项目？',
+        message: '将删除“${project.name}”的材料、训练记录、报告和评委问答。此操作无法撤销。',
+        confirmLabel: '彻底删除',
+        icon: Icons.delete_outline_rounded,
+        destructive: true,
+        confirmKey: const ValueKey('confirm-project-deletion'),
       );
-      if (confirmed != true || !mounted) return;
+      if (!confirmed || !mounted) return;
       setState(() => _mutating = true);
       await ref.read(apiClientProvider).deleteProject(project.id);
       if (!mounted) return;

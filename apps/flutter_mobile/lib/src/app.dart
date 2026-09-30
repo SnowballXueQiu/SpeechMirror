@@ -16,6 +16,7 @@ import 'screens/report_screen.dart';
 import 'screens/training_screen.dart';
 import 'screens/training_history_screen.dart';
 import 'theme.dart';
+import 'widgets.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final auth = ref.read(authControllerProvider);
@@ -25,10 +26,18 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       if (!auth.initialized) return null;
       final signingIn = state.matchedLocation == '/login';
-      if (!auth.authenticated) return signingIn ? null : '/login';
+      if (!auth.authenticated) {
+        if (signingIn) return null;
+        return Uri(
+          path: '/login',
+          queryParameters: {'from': state.uri.toString()},
+        ).toString();
+      }
       final onboarding = state.matchedLocation == '/onboarding';
       if (auth.needsOnboarding && !onboarding) return '/onboarding';
       if (!auth.needsOnboarding && (signingIn || onboarding)) {
+        final from = state.uri.queryParameters['from'];
+        if (signingIn && from != null && from.startsWith('/')) return from;
         return '/projects';
       }
       return null;
@@ -140,10 +149,12 @@ class _BrandLoader extends StatelessWidget {
   Widget build(BuildContext context) => const Column(
     mainAxisSize: MainAxisSize.min,
     children: [
+      AppLogo(size: 68),
+      SizedBox(height: 14),
       Text(
         '言镜',
         style: TextStyle(
-          fontSize: 34,
+          fontSize: 28,
           fontWeight: FontWeight.w800,
           color: AppColors.ink,
         ),
