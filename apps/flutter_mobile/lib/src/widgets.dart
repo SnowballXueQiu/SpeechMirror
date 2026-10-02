@@ -129,7 +129,12 @@ class AppSheet extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-            child,
+            Flexible(
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: child,
+              ),
+            ),
           ],
         ),
       ),
