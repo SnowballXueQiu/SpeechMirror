@@ -61,6 +61,7 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   bool _speaking = false;
   bool _timerRunning = false;
   bool _deadlineSignaled = false;
+  bool _requiresNewRecording = false;
 
   JuryQuestion? get _currentQuestion =>
       _questions.isEmpty ? null : _questions.last;
@@ -264,6 +265,14 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       if (mounted) showError(context, StateError('需要麦克风权限才能回答问题'));
       return;
     }
+    await _discardPendingAudio();
+    if (!mounted) return;
+    setState(() {
+      _answer.clear();
+      _error = null;
+      _requiresNewRecording = false;
+      _pendingRequestId = null;
+    });
     FocusManager.instance.primaryFocus?.unfocus();
     await _tts.stop();
     final directory = await getTemporaryDirectory();
@@ -301,12 +310,36 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       _resumeTimer();
       await _showAnswerSheet();
     } catch (error) {
+      final requiresNewRecording = _isNoSpeechError(error);
+      if (requiresNewRecording) await _discardPendingAudio();
       if (!mounted) return;
       setState(() {
         _transcribing = false;
         _error = error.toString();
+        _requiresNewRecording = requiresNewRecording;
       });
+      if (requiresNewRecording) _resumeTimer();
     }
+  }
+
+  bool _isNoSpeechError(Object error) => error.toString().contains('未识别到有效语音');
+
+  Future<void> _discardPendingAudio() async {
+    final path = _pendingAudioPath;
+    _pendingAudioPath = null;
+    if (path == null) return;
+    final file = File(path);
+    if (await file.exists()) await file.delete();
+  }
+
+  Future<void> _rerecord() async {
+    await _discardPendingAudio();
+    if (!mounted) return;
+    setState(() {
+      _error = null;
+      _requiresNewRecording = false;
+    });
+    await _toggleVoice();
   }
 
   Future<void> _showAnswerSheet() async {
@@ -483,7 +516,10 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
 
   Future<void> _retry() async {
     if (_loading || _submitting || _finishing) return;
-    setState(() => _error = null);
+    setState(() {
+      _error = null;
+      _requiresNewRecording = false;
+    });
     if (_pendingAudioPath != null) {
       await _transcribePendingAudio();
       return;
@@ -497,6 +533,10 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
       await _advanceAfterAnswer(_pendingAnswer!);
       return;
     }
+    if (_currentQuestion != null) {
+      _resumeTimer();
+      return;
+    }
     setState(() => _loading = true);
     await _initialize();
   }
@@ -504,6 +544,13 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
   Future<void> _finish({required bool announce}) async {
     if (_finishing) return;
     _pauseTimer();
+    if (mounted) {
+      setState(() {
+        _finishing = true;
+        _error = null;
+        _requiresNewRecording = false;
+      });
+    }
     if (_recording) {
       final path = await _recorder.stop();
       if (path != null) {
@@ -511,13 +558,10 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
         if (await file.exists()) await file.delete();
       }
     }
+    await _discardPendingAudio();
     await _tts.stop();
     if (!mounted) return;
-    setState(() {
-      _recording = false;
-      _finishing = true;
-      _error = null;
-    });
+    setState(() => _recording = false);
     if (announce) {
       HapticFeedback.mediumImpact();
     }
@@ -561,15 +605,16 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final busy =
+    final processing =
         _loading ||
         _transcribing ||
         _submitting ||
         _finishing ||
-        _automaticRetryAttempt > 0 ||
-        _error != null;
+        _automaticRetryAttempt > 0;
+    final answerControlsDisabled =
+        processing || _currentQuestion == null || _pendingAnswer != null;
     return PopScope(
-      canPop: !_recording && !busy,
+      canPop: !_recording && !_finishing,
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Stack(
@@ -591,14 +636,18 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                     ),
                     const Spacer(),
                     if (_error != null)
-                      _ErrorBanner(message: _error!, onRetry: _retry),
+                      _ErrorBanner(
+                        message: _error!,
+                        actionLabel: _requiresNewRecording ? '重新录制' : '重试',
+                        onAction: _requiresNewRecording ? _rerecord : _retry,
+                      ),
                     if (_error != null) const SizedBox(height: 10),
                     _QuestionOverlay(
                       status: _statusText,
                       question: _activePrompt,
                       speaking: _speaking,
                       loading: _loading,
-                      onReplay: busy || _activePrompt == null
+                      onReplay: processing || _activePrompt == null
                           ? null
                           : _speakCurrent,
                     ),
@@ -609,7 +658,7 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                         _RoundControl(
                           tooltip: '输入文字回答',
                           icon: Icons.keyboard_alt_outlined,
-                          onPressed: busy || _recording
+                          onPressed: answerControlsDisabled || _recording
                               ? null
                               : _showAnswerSheet,
                         ),
@@ -619,14 +668,16 @@ class _JuryScreenState extends ConsumerState<JuryScreen> {
                           icon: _recording ? Icons.stop_rounded : Icons.mic,
                           emphasized: true,
                           active: _recording,
-                          onPressed: busy && !_recording ? null : _toggleVoice,
+                          onPressed: answerControlsDisabled && !_recording
+                              ? null
+                              : _toggleVoice,
                         ),
                         const SizedBox(width: 22),
                         _RoundControl(
                           tooltip: '结束答辩',
                           icon: Icons.call_end,
                           destructive: true,
-                          onPressed: busy ? null : _confirmManualEnd,
+                          onPressed: _finishing ? null : _confirmManualEnd,
                         ),
                       ],
                     ),
@@ -817,10 +868,15 @@ class _QuestionOverlay extends StatelessWidget {
 }
 
 class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message, required this.onRetry});
+  const _ErrorBanner({
+    required this.message,
+    required this.actionLabel,
+    required this.onAction,
+  });
 
   final String message;
-  final VoidCallback onRetry;
+  final String actionLabel;
+  final VoidCallback onAction;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -842,8 +898,8 @@ class _ErrorBanner extends StatelessWidget {
           ),
         ),
         TextButton(
-          onPressed: onRetry,
-          child: const Text('重试', style: TextStyle(color: Colors.white)),
+          onPressed: onAction,
+          child: Text(actionLabel, style: const TextStyle(color: Colors.white)),
         ),
       ],
     ),

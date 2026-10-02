@@ -108,6 +108,53 @@ void main() {
     expect(api.generationAttempts, 6);
     expect(find.text('AI服务暂时未完成请求，请稍后重试'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
+    final endButton = tester.widget<IconButton>(
+      find.descendant(
+        of: find.byTooltip('结束答辩'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(endButton.onPressed, isNotNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('answer failure does not lock answer or end controls', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FailingAnswerJuryApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: const MaterialApp(
+          home: JuryScreen(projectId: 'project-1', sessionId: 'session-1'),
+        ),
+      ),
+    );
+    await _pumpAsync(tester);
+    await tester.tap(find.byTooltip('输入文字回答'));
+    await _pumpAsync(tester);
+    await tester.enterText(find.byType(TextField), '测试回答');
+    await tester.tap(find.text('提交回答'));
+    await _pumpAsync(tester, cycles: 220);
+
+    expect(find.text('AI服务暂时未完成请求，请稍后重试'), findsOneWidget);
+    for (final tooltip in ['输入文字回答', '开始回答', '结束答辩']) {
+      final button = tester.widget<IconButton>(
+        find.descendant(
+          of: find.byTooltip(tooltip),
+          matching: find.byType(IconButton),
+        ),
+      );
+      expect(
+        button.onPressed,
+        isNotNull,
+        reason: '$tooltip should stay enabled',
+      );
+    }
     expect(tester.takeException(), isNull);
   });
 
@@ -261,6 +308,20 @@ class _FailingJuryApiClient extends _JuryApiClient {
     bool regenerate = false,
   }) async {
     generationAttempts += 1;
+    throw const ApiException('AI服务暂时未完成请求，请稍后重试');
+  }
+}
+
+class _FailingAnswerJuryApiClient extends _JuryApiClient {
+  @override
+  Future<JuryAnswer> submitAnswer(
+    String questionId,
+    String sessionId,
+    String text, {
+    String? parentAnswerId,
+    String? requestId,
+    int? elapsedSeconds,
+  }) async {
     throw const ApiException('AI服务暂时未完成请求，请稍后重试');
   }
 }
