@@ -147,6 +147,13 @@ export struct CameraStage {
           Text('未检测到摄像头').fontSize(14).fontWeight(FontWeight.Medium).fontColor('#88FFFFFF')
         }.alignItems(HorizontalAlign.Center)
       }
-    }.width('100%').height('100%').backgroundColor('#0D100E')
+    }
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#0D100E')
+      .expandSafeArea(
+        [SafeAreaType.SYSTEM, SafeAreaType.CUTOUT],
+        [SafeAreaEdge.TOP]
+      )
   }
 }

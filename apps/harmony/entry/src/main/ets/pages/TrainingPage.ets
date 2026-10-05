@@ -1,4 +1,4 @@
-import { router } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
 import { vibrator } from '@kit.SensorServiceKit';
 import { apiClient } from '../services/ApiClient';
 import { CameraStage } from '../ui/CameraStage';
@@ -20,13 +20,28 @@ struct TrainingPage {
   private params: TrainingParams = router.getParams() as TrainingParams;
   private timer: number = -1;
   private sessionId: string = '';
+  private enteringJury: boolean = false;
 
   aboutToAppear(): void {
+    this.setImmersive(true);
     setTimeout(() => this.start(), 450);
   }
 
   aboutToDisappear(): void {
     this.stopTimer();
+    if (!this.enteringJury) this.setImmersive(false);
+  }
+
+  private async setImmersive(enabled: boolean): Promise<void> {
+    try {
+      const mainWindow = await window.getLastWindow(getContext(this));
+      await mainWindow.setWindowLayoutFullScreen(enabled);
+      await mainWindow.setWindowSystemBarProperties({
+        statusBarColor: enabled ? '#00000000' : '#FFFFFFFF',
+        statusBarContentColor: enabled ? '#FFFFFFFF' : '#FF111111'
+      });
+    } catch (_) {
+    }
   }
 
   private stopTimer(): void {
@@ -93,6 +108,7 @@ struct TrainingPage {
     this.error = '';
     try {
       await apiClient.completeSession(this.sessionId, Math.max(1, this.elapsed), this.statement.trim());
+      this.enteringJury = true;
       router.replaceUrl({
         url: 'pages/JuryPage',
         params: {
@@ -102,6 +118,7 @@ struct TrainingPage {
         }
       });
     } catch (reason) {
+      this.enteringJury = false;
       this.error = '陈述尚未提交：' + String(reason);
       this.recording = true;
       this.timer = setInterval(() => this.elapsed += 1, 1000);
@@ -303,6 +320,13 @@ struct TrainingPage {
         .padding({ left: 16, right: 16, top: 48, bottom: 24 })
       if (this.showStatement) this.statementSheet()
       if (this.showExit) this.exitSheet()
-    }.width('100%').height('100%').backgroundColor(Palette.NIGHT)
+    }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Palette.NIGHT)
+      .expandSafeArea(
+        [SafeAreaType.SYSTEM, SafeAreaType.CUTOUT],
+        [SafeAreaEdge.TOP]
+      )
   }
 }

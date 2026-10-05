@@ -1,4 +1,4 @@
-import { router } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
 import { JuryAnswer, JuryEvaluation, JuryQuestion } from '../models/Models';
 import { apiClient } from '../services/ApiClient';
 import { CameraStage } from '../ui/CameraStage';
@@ -30,11 +30,25 @@ struct JuryPage {
   private timerRunning: boolean = false;
 
   aboutToAppear(): void {
+    this.setImmersive(true);
     this.initialize();
   }
 
   aboutToDisappear(): void {
     this.pauseTimer();
+    this.setImmersive(false);
+  }
+
+  private async setImmersive(enabled: boolean): Promise<void> {
+    try {
+      const mainWindow = await window.getLastWindow(getContext(this));
+      await mainWindow.setWindowLayoutFullScreen(enabled);
+      await mainWindow.setWindowSystemBarProperties({
+        statusBarColor: enabled ? '#00000000' : '#FFFFFFFF',
+        statusBarContentColor: enabled ? '#FFFFFFFF' : '#FF111111'
+      });
+    } catch (_) {
+    }
   }
 
   private clock(seconds: number): string {
@@ -455,6 +469,13 @@ struct JuryPage {
         .padding({ left: 16, right: 16, top: 48, bottom: 24 })
       if (this.showAnswer) this.answerSheet()
       if (this.showEnd) this.endSheet()
-    }.width('100%').height('100%').backgroundColor(Palette.NIGHT)
+    }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Palette.NIGHT)
+      .expandSafeArea(
+        [SafeAreaType.SYSTEM, SafeAreaType.CUTOUT],
+        [SafeAreaEdge.TOP]
+      )
   }
 }
