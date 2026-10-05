@@ -1,8 +1,15 @@
 {
   "src": [
     "pages/LoginPage",
+    "pages/OnboardingPage",
     "pages/ProjectsPage",
+    "pages/ProjectEditorPage",
+    "pages/ProfilePage",
+    "pages/PreferencesPage",
+    "pages/LegalPage",
     "pages/ProjectPage",
+    "pages/MaterialPage",
+    "pages/HistoryPage",
     "pages/TrainingPage",
     "pages/ReportPage",
     "pages/JuryPage"
