@@ -16,8 +16,8 @@ struct ProjectEditorPage {
   private project?: Project = undefined;
 
   aboutToAppear(): void {
-    const params = router.getParams() as EditorParams;
-    if (params.projectJson !== undefined && params.projectJson.length > 0) {
+    const params = router.getParams() as EditorParams | undefined;
+    if (params?.projectJson !== undefined && params.projectJson.length > 0) {
       try {
         this.project = JSON.parse(params.projectJson) as Project;
         this.name = this.project.name;

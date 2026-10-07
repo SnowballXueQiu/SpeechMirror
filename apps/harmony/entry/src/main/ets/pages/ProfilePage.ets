@@ -1,5 +1,5 @@
 import { router } from '@kit.ArkUI';
-import { ActivityDay, ActivitySummary, UserProfile } from '../models/Models';
+import { ActivityDay, ActivitySummary, UserProfile, UserProfileUpdate } from '../models/Models';
 import { apiClient } from '../services/ApiClient';
 import { Palette } from '../ui/Palette';
 
@@ -16,6 +16,7 @@ struct ProfilePage {
   @State error: string = '';
   @State cacheMessage: string = '';
   @State showLogout: boolean = false;
+  private activityScroller: Scroller = new Scroller();
 
   onPageShow(): void { this.reload(); }
 
@@ -26,6 +27,9 @@ struct ProfilePage {
       this.profile = results[0] as UserProfile;
       this.activity = results[1] as ActivitySummary;
       this.error = '';
+      setTimeout((): void => {
+        this.activityScroller.scrollEdge(Edge.End);
+      }, 80);
     } catch (reason) {
       this.error = String(reason);
     } finally {
@@ -53,25 +57,22 @@ struct ProfilePage {
     const weeks: ActivityCell[][] = [];
     const values = new Map<string, ActivityDay>();
     (this.activity?.days ?? []).forEach((day: ActivityDay) => values.set(day.date.slice(0, 10), day));
-
     const throughValue = this.activity?.through ?? new Date().toISOString().slice(0, 10);
     const through = new Date(throughValue.slice(0, 10) + 'T12:00:00');
-    const first = new Date(through.getTime() - 181 * 24 * 60 * 60 * 1000);
+    const first = new Date(through.getTime() - 364 * 24 * 60 * 60 * 1000);
     const mondayOffset = (first.getDay() + 6) % 7;
     const start = new Date(first.getTime() - mondayOffset * 24 * 60 * 60 * 1000);
-
-    for (let weekIndex = 0; weekIndex < 26; weekIndex += 1) {
+    for (let weekIndex = 0; weekIndex < 53; weekIndex += 1) {
       const week: ActivityCell[] = [];
       for (let weekday = 0; weekday < 7; weekday += 1) {
         const date = new Date(start.getTime() + (weekIndex * 7 + weekday) * 24 * 60 * 60 * 1000);
         const key = this.dateKey(date);
         const value = values.get(key);
-        const visible = date.getTime() >= first.getTime() && date.getTime() <= through.getTime();
         week.push({
           date: key,
           use_count: value?.use_count ?? 0,
           practice_count: value?.practice_count ?? 0,
-          visible: visible
+          visible: date.getTime() >= first.getTime() && date.getTime() <= through.getTime()
         });
       }
       weeks.push(week);
@@ -79,9 +80,37 @@ struct ProfilePage {
     return weeks;
   }
 
-  private displayIdentity(): string {
-    if (this.profile?.identity === '其他') return this.profile?.identity_other ?? '其他';
-    return this.profile?.identity ?? '未设置身份';
+  private profileSummary(): string {
+    const parts: string[] = [];
+    if (this.profile?.identity === '其他') {
+      if ((this.profile?.identity_other ?? '').length > 0) parts.push(this.profile?.identity_other ?? '');
+    } else if ((this.profile?.identity ?? '').length > 0) {
+      parts.push(this.profile?.identity ?? '');
+    }
+    const scenarios = this.profile?.scenarios ?? [];
+    if (scenarios.length > 0) parts.push(scenarios.join('、'));
+    return parts.length > 0 ? parts.join(' · ') : '尚未设置';
+  }
+
+  private async setResearchConsent(value: boolean): Promise<void> {
+    if (this.profile === undefined) return;
+    const update: UserProfileUpdate = {
+      bio: this.profile.bio,
+      identity: this.profile.identity,
+      identity_other: this.profile.identity_other,
+      scenario: this.profile.scenario,
+      scenarios: this.profile.scenarios,
+      scenario_other: this.profile.scenario_other,
+      purposes: this.profile.purposes,
+      purpose_other: this.profile.purpose_other,
+      onboarding_completed: true,
+      research_consent: value
+    };
+    try {
+      this.profile = await apiClient.updateProfile(update);
+    } catch (reason) {
+      this.error = String(reason);
+    }
   }
 
   private async logout(): Promise<void> {
@@ -90,16 +119,33 @@ struct ProfilePage {
   }
 
   @Builder
-  private menuRow(icon: string, title: string, subtitle: string) {
+  private activityStat(value: string, label: string, last: boolean = false) {
+    Column({ space: 3 }) {
+      Text(value).fontSize(20).fontWeight(FontWeight.Bold).fontColor(Palette.WHITE)
+      Text(label).fontSize(11).fontColor('#8AFFFFFF')
+    }.justifyContent(FlexAlign.Center).layoutWeight(1)
+      .border({ width: { right: last ? 0 : 1 }, color: '#1FFFFFFF' })
+  }
+
+  @Builder
+  private menuRow(icon: Resource, title: string, subtitle: string = '', destructive: boolean = false) {
     Row() {
-      Text(icon).width(38).height(38).textAlign(TextAlign.Center).fontSize(17)
-        .fontWeight(FontWeight.Bold).fontColor(Palette.BLUE_DARK).backgroundColor(Palette.SOFT_BLUE).borderRadius(7)
-      Column({ space: 4 }) {
-        Text(title).fontSize(15).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
-        Text(subtitle).fontSize(12).fontColor(Palette.MUTED)
-      }.alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
-      Text('›').fontSize(24).fontColor(Palette.MUTED)
-    }.width('100%').padding({ top: 13, bottom: 13 })
+      Stack({ alignContent: Alignment.Center }) {
+        Image(icon).width(21).height(21).objectFit(ImageFit.Contain)
+      }.width(40).height(40).backgroundColor(destructive ? Palette.SOFT_RED : Palette.WHITE)
+        .borderRadius(7).border({ width: 1, color: Palette.LINE })
+      Column({ space: 2 }) {
+        Text(title).fontSize(15).fontWeight(FontWeight.Bold)
+          .fontColor(destructive ? Palette.RED : Palette.INK)
+        if (subtitle.length > 0) {
+          Text(subtitle).fontSize(12).fontColor(Palette.MUTED).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 14 })
+      if (!destructive) {
+        Text('›').fontSize(23).fontColor(Palette.MUTED)
+      }
+    }.width('100%').constraintSize({ minHeight: 66 }).border({ width: { bottom: 1 }, color: Palette.LINE })
   }
 
   build() {
@@ -108,93 +154,102 @@ struct ProfilePage {
         Row() {
           Button('‹').width(42).height(42).fontSize(28).fontColor(Palette.INK)
             .backgroundColor(Color.Transparent).onClick(() => router.back())
-          Text('用户中心').fontSize(17).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
-          Blank()
-          Button('编辑').type(ButtonType.Normal).height(40).fontSize(13).fontColor(Palette.BLUE_DARK)
-            .backgroundColor(Color.Transparent).onClick(() => router.pushUrl({ url: 'pages/PreferencesPage' }))
-        }.width('100%').height(56).padding({ left: 4, right: 12 })
+          Text('账户').fontSize(17).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
+        }.width('100%').height(56)
         if (this.loading && this.profile === undefined) {
-          Column({ space: 12 }) {
-            LoadingProgress().width(30).height(30).color(Palette.BLUE)
-            Text('正在同步个人资料').fontSize(13).fontColor(Palette.MUTED)
-          }.layoutWeight(1).justifyContent(FlexAlign.Center)
+          LoadingProgress().width(30).height(30).color(Palette.BLUE).layoutWeight(1)
         } else {
           Scroll() {
             Column() {
               Row() {
                 Stack({ alignContent: Alignment.Center }) {
                   Text((this.profile?.username ?? 'U').slice(0, 1).toUpperCase())
-                    .fontSize(31).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
-                }.width(78).height(78).borderRadius(39).backgroundColor(Palette.SIGNAL)
-                Column({ space: 6 }) {
-                  Text(this.profile?.username ?? '用户').fontSize(24).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
-                  Text(this.displayIdentity()).fontSize(13).fontColor(Palette.BLUE_DARK)
-                  Text('ID  ' + (this.profile?.id ?? '').slice(0, 12)).fontSize(11).fontColor(Palette.MUTED)
-                }.alignItems(HorizontalAlign.Start).margin({ left: 16 })
+                    .fontSize(26).fontWeight(FontWeight.Bold).fontColor(Palette.SIGNAL)
+                  Stack({ alignContent: Alignment.Center }) {
+                    Image($r('app.media.ic_edit_white')).width(14).height(14)
+                  }.width(26).height(26).borderRadius(13).backgroundColor(Palette.BLUE)
+                    .border({ width: 2, color: Palette.PAPER }).position({ x: 49, y: 49 })
+                }.width(72).height(72).borderRadius(36).backgroundColor(Palette.INK)
+                Column({ space: 5 }) {
+                  Text(this.profile?.username ?? '用户').fontSize(24).fontWeight(FontWeight.Bold)
+                    .fontColor(Palette.INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Row({ space: 5 }) {
+                    Text('ID ' + (this.profile?.id ?? '')).fontSize(10).fontColor(Palette.MUTED).maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+                    Image($r('app.media.ic_copy')).width(14).height(14)
+                  }.width('100%')
+                }.alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 16 })
               }.width('100%')
-              if ((this.profile?.bio ?? '').trim().length > 0) {
-                Text(this.profile?.bio ?? '').fontSize(14).fontColor(Palette.MUTED).lineHeight(21)
-                  .margin({ top: 16 }).width('100%')
-              }
+              Row() {
+                Text((this.profile?.bio ?? '').trim().length > 0 ? (this.profile?.bio ?? '') : '添加个人简介')
+                  .fontSize(14).fontColor((this.profile?.bio ?? '').trim().length > 0 ? Palette.INK : Palette.MUTED)
+                  .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Image($r('app.media.ic_edit')).width(19).height(19)
+              }.width('100%').padding({ top: 11, bottom: 11 }).margin({ top: 18 })
+                .border({ width: { top: 1, bottom: 1 }, color: Palette.LINE })
+                .onClick(() => router.pushUrl({ url: 'pages/PreferencesPage' }))
               if (this.error.length > 0) {
                 Text(this.error).fontSize(13).fontColor(Palette.RED).padding(12).width('100%')
                   .backgroundColor(Palette.SOFT_RED).borderRadius(7).margin({ top: 16 })
               }
               Column() {
                 Row() {
-                  Text('近半年').fontSize(19).fontWeight(FontWeight.Bold).fontColor(Palette.WHITE)
+                  Row({ space: 9 }) {
+                    Text('▦').fontSize(18).fontColor(Palette.SIGNAL)
+                    Text('过去一年').fontSize(16).fontWeight(FontWeight.Bold).fontColor(Palette.WHITE)
+                  }
                   Blank()
-                  Text('练习活跃度')
-                    .fontSize(12).fontColor('#88FFFFFF')
+                  Text('练习活跃度').fontSize(12).fontColor('#8AFFFFFF')
                 }.width('100%')
-                Row({ space: 3 }) {
-                  ForEach(this.activityWeeks(), (week: ActivityCell[], weekIndex: number) => {
-                    Column({ space: 3 }) {
-                      ForEach(week, (day: ActivityCell) => {
-                        Row().width(7).height(7).borderRadius(2).backgroundColor(this.activityColor(day))
-                      }, (day: ActivityCell) => day.date)
-                    }
-                  }, (week: ActivityCell[], weekIndex: number) => String(weekIndex))
-                }.width('100%').margin({ top: 18, bottom: 19 })
+                Scroll(this.activityScroller) {
+                  Row({ space: 3 }) {
+                    ForEach(this.activityWeeks().slice(21), (week: ActivityCell[], weekIndex: number) => {
+                      Column({ space: 3 }) {
+                        ForEach(week, (day: ActivityCell) => {
+                          Row().width(7).height(7).borderRadius(2).backgroundColor(this.activityColor(day))
+                        }, (day: ActivityCell) => day.date)
+                      }
+                    }, (week: ActivityCell[], weekIndex: number) => String(weekIndex))
+                  }
+                }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+                  .edgeEffect(EdgeEffect.None).width('100%').height(68).margin({ top: 18, bottom: 18 })
                 Row() {
-                  Column({ space: 4 }) {
-                    Text(String(this.activity?.active_days ?? 0)).fontSize(23).fontWeight(FontWeight.Bold).fontColor(Palette.SIGNAL)
-                    Text('活跃天数').fontSize(10).fontColor('#77FFFFFF')
-                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  Column({ space: 4 }) {
-                    Text(String(this.activity?.current_streak ?? 0) + ' 天').fontSize(23).fontWeight(FontWeight.Bold).fontColor(Palette.WHITE)
-                    Text('连续天数').fontSize(10).fontColor('#77FFFFFF')
-                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  Column({ space: 4 }) {
-                    Text(String(this.activity?.total_practices ?? 0)).fontSize(23).fontWeight(FontWeight.Bold).fontColor(Palette.WHITE)
-                    Text('模拟答辩').fontSize(10).fontColor('#77FFFFFF')
-                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-                }.width('100%')
-              }.alignItems(HorizontalAlign.Start).padding(20).width('100%').margin({ top: 26 })
-                .backgroundColor(Palette.NIGHT).borderRadius(8)
-              Text('账户与偏好').fontSize(13).fontWeight(FontWeight.Bold).fontColor(Palette.MUTED)
-                .margin({ top: 28, bottom: 4 }).width('100%')
-              Column() {
-                Column() {
-                  this.menuRow('人', '身份与训练偏好', '场景、用途与个人简介')
-                }.onClick(() => router.pushUrl({ url: 'pages/PreferencesPage' }))
-                Divider().strokeWidth(1).color(Palette.LINE).margin({ left: 50 })
-                Column() {
-                  this.menuRow('隐', '隐私政策', '了解数据如何被处理')
-                }.onClick(() => router.pushUrl({ url: 'pages/LegalPage', params: { kind: 'privacy' } }))
-                Divider().strokeWidth(1).color(Palette.LINE).margin({ left: 50 })
-                Column() {
-                  this.menuRow('约', '用户协议', '服务使用规则')
-                }.onClick(() => router.pushUrl({ url: 'pages/LegalPage', params: { kind: 'terms' } }))
-                Divider().strokeWidth(1).color(Palette.LINE).margin({ left: 50 })
-                Column() {
-                  this.menuRow('清', '清理缓存', this.cacheMessage.length > 0 ? this.cacheMessage : '释放本地临时数据')
-                }.onClick(() => this.cacheMessage = '缓存已清理')
-              }.width('100%').border({ width: { top: 1, bottom: 1 }, color: Palette.LINE })
-              Button('退出登录').type(ButtonType.Normal).height(50).width('100%').margin({ top: 24, bottom: 26 })
-                .fontWeight(FontWeight.Bold).fontColor(Palette.RED).backgroundColor(Palette.SOFT_RED).borderRadius(7)
-                .onClick(() => this.showLogout = true)
-            }.alignItems(HorizontalAlign.Start).width('100%').padding({ left: 20, right: 20, top: 14 })
+                  this.activityStat(String(this.activity?.active_days ?? 0), '活跃天数')
+                  this.activityStat(String(this.activity?.current_streak ?? 0), '连续天数')
+                  this.activityStat(String(this.activity?.total_practices ?? 0), '模拟答辩', true)
+                }.width('100%').height(48)
+              }.alignItems(HorizontalAlign.Start).padding({ left: 18, right: 18, top: 18, bottom: 16 })
+                .width('100%').margin({ top: 28 }).backgroundColor(Palette.NIGHT).borderRadius(8)
+              Text('个人设置').fontSize(12).fontWeight(FontWeight.Bold).fontColor(Palette.MUTED)
+                .margin({ top: 32, bottom: 5 }).width('100%')
+              Column() { this.menuRow($r('app.media.ic_preferences'), '身份与训练偏好', this.profileSummary()) }
+                .onClick(() => router.pushUrl({ url: 'pages/PreferencesPage' }))
+              Row() {
+                Stack({ alignContent: Alignment.Center }) {
+                  Image($r('app.media.ic_research')).width(21).height(21)
+                }.width(40).height(40).backgroundColor(Palette.WHITE).borderRadius(7)
+                  .border({ width: 1, color: Palette.LINE })
+                Column({ space: 2 }) {
+                  Text('匿名产品调研').fontSize(15).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
+                  Text('仅汇总身份、场景和训练目标').fontSize(12).fontColor(Palette.MUTED)
+                }.alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 14 })
+                Toggle({ type: ToggleType.Switch, isOn: this.profile?.research_consent ?? false })
+                  .selectedColor(Palette.BLUE).onChange((value: boolean) => this.setResearchConsent(value))
+              }.width('100%').constraintSize({ minHeight: 66 }).border({ width: { bottom: 1 }, color: Palette.LINE })
+              Text('存储与规则').fontSize(12).fontWeight(FontWeight.Bold).fontColor(Palette.MUTED)
+                .margin({ top: 26, bottom: 5 }).width('100%')
+              Column() { this.menuRow($r('app.media.ic_cache'), '清理缓存', this.cacheMessage.length > 0 ? this.cacheMessage : '0 B') }
+                .onClick(() => this.cacheMessage = '缓存已清理')
+              Column() { this.menuRow($r('app.media.ic_privacy'), '隐私政策') }
+                .onClick(() => router.pushUrl({ url: 'pages/LegalPage', params: { kind: 'privacy' } }))
+              Column() { this.menuRow($r('app.media.ic_terms'), '用户协议') }
+                .onClick(() => router.pushUrl({ url: 'pages/LegalPage', params: { kind: 'terms' } }))
+              Text('账户').fontSize(12).fontWeight(FontWeight.Bold).fontColor(Palette.MUTED)
+                .margin({ top: 26, bottom: 5 }).width('100%')
+              Column() { this.menuRow($r('app.media.ic_logout'), '退出登录', '', true) }.onClick(() => this.showLogout = true)
+              Text('SpeechMirror 1.0.0').fontSize(12).fontColor(Palette.MUTED)
+                .margin({ top: 24, bottom: 48 }).width('100%').textAlign(TextAlign.Center)
+            }.alignItems(HorizontalAlign.Start).width('100%').padding({ left: 20, right: 20, top: 10 })
           }.layoutWeight(1).width('100%')
         }
       }.width('100%').height('100%').backgroundColor(Palette.PAPER)
@@ -211,8 +266,8 @@ struct ProfilePage {
                 .backgroundColor(Palette.RED).borderRadius(7).onClick(() => this.logout())
             }.width('100%').margin({ top: 8 })
           }.padding(22).width('100%').backgroundColor(Palette.WHITE)
-            .borderRadius({ topLeft: 14, topRight: 14 })
-        }.width('100%').height('100%').backgroundColor('#66000000')
+            .borderRadius({ topLeft: 22, topRight: 22 })
+        }.width('100%').height('100%').backgroundColor('#70111412')
       }
     }.width('100%').height('100%')
   }

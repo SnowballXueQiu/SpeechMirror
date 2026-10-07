@@ -90,14 +90,17 @@ struct ProjectPage {
             .backgroundColor(Color.Transparent).onClick(() => router.back())
           Text('答辩项目').fontSize(17).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
           Blank()
-          Button('编辑').type(ButtonType.Normal).height(40).fontSize(13).fontColor(Palette.BLUE_DARK)
-            .backgroundColor(Color.Transparent).enabled(this.project !== undefined)
-            .onClick(() => router.pushUrl({
-              url: 'pages/ProjectEditorPage',
-              params: { projectJson: JSON.stringify(this.project) }
-            }))
-          Button('•••').type(ButtonType.Normal).width(42).height(40).fontSize(16).fontColor(Palette.INK)
-            .backgroundColor(Color.Transparent).onClick(() => this.showDelete = true)
+          Stack({ alignContent: Alignment.Center }) {
+            Image($r('app.media.ic_history')).width(23).height(23)
+          }.width(42).height(42).onClick(() => router.pushUrl({
+            url: 'pages/HistoryPage',
+            params: { projectId: this.projectId, projectName: this.project?.name ?? '答辩项目' }
+          }))
+          Stack({ alignContent: Alignment.Center }) {
+            Image($r('app.media.ic_more')).width(23).height(23)
+          }.width(42).height(42).borderRadius(21).backgroundColor(Palette.WHITE)
+            .border({ width: 1, color: Palette.LINE }).margin({ left: 4, right: 8 })
+            .onClick(() => this.showDelete = true)
         }.width('100%').height(54)
         if (this.loading && this.project === undefined) {
           Column({ space: 12 }) {

@@ -17,6 +17,7 @@ struct TrainingPage {
   @State error: string = '';
   @State showExit: boolean = false;
   @State showStatement: boolean = false;
+  @State greeting: boolean = true;
   private params: TrainingParams = router.getParams() as TrainingParams;
   private timer: number = -1;
   private sessionId: string = '';
@@ -24,7 +25,10 @@ struct TrainingPage {
 
   aboutToAppear(): void {
     this.setImmersive(true);
-    setTimeout(() => this.start(), 450);
+    setTimeout(() => {
+      this.greeting = false;
+      this.start();
+    }, 4200);
   }
 
   aboutToDisappear(): void {
@@ -161,44 +165,51 @@ struct TrainingPage {
   private statusArea() {
     Column({ space: 9 }) {
       Row({ space: 7 }) {
-        if (this.processing) {
+        if (this.greeting || this.processing) {
           LoadingProgress().width(13).height(13).color(Palette.SIGNAL)
         } else {
           Text('').width(7).height(7).backgroundColor(Palette.SIGNAL).borderRadius(4)
         }
-        Text(this.processing ? '正在准备' : (this.recording ? '项目陈述进行中' : '模拟答辩'))
+        Text(this.greeting ? 'AI评委' : (this.processing ? '正在准备' : (this.recording ? '项目陈述进行中' : '模拟答辩')))
           .fontSize(12)
           .fontWeight(FontWeight.Bold)
           .fontColor('#B8FFFFFF')
       }
-      Text(this.processing ? '正在连接训练服务' : (this.recording ? '面向镜头完成项目介绍' : '准备好后开始'))
+      Text(this.greeting ? '好的，请开始介绍你的项目。我会先完整听你介绍，介绍结束后正式开始答辩。' :
+        (this.processing ? '正在连接训练服务' : (this.recording ? '面向镜头完成项目介绍' : '准备好后开始')))
         .fontSize(18)
         .fontWeight(FontWeight.Bold)
         .fontColor(Palette.WHITE)
         .textAlign(TextAlign.Center)
         .maxLines(2)
       Row() {
-        Button({ type: ButtonType.Circle }) {
-          Image($r('app.media.ic_keyboard')).width(23).height(23)
+        if (!this.greeting) {
+          Button({ type: ButtonType.Circle }) {
+            Image($r('app.media.ic_keyboard')).width(23).height(23)
+          }
+            .width(50)
+            .height(50)
+            .backgroundColor('#4DFFFFFF')
+            .borderRadius(25)
+            .enabled(this.recording && !this.processing)
+            .onClick(() => this.openStatementSheet())
+        } else {
+          Blank().width(50)
         }
-          .width(50)
-          .height(50)
-          .backgroundColor('#4DFFFFFF')
-          .borderRadius(25)
-          .enabled(this.recording && !this.processing)
-          .onClick(() => this.openStatementSheet())
         Column({ space: 8 }) {
-          Button(this.processing ? '···' : (this.recording ? '→' : '●'))
-            .width(70)
-            .height(70)
-            .fontSize(this.recording ? 30 : 20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(Palette.INK)
-            .backgroundColor(this.recording ? Palette.WHITE : Palette.SIGNAL)
-            .borderRadius(35)
-            .enabled(!this.processing)
+          Stack({ alignContent: Alignment.Center }) {
+            if (this.greeting || this.processing) {
+              LoadingProgress().width(22).height(22).color(Palette.WHITE)
+            } else {
+              Text(this.recording ? '→' : '●').fontSize(this.recording ? 30 : 20)
+                .fontWeight(FontWeight.Bold).fontColor(Palette.INK)
+            }
+          }.width(70).height(70).backgroundColor(this.greeting || this.processing ? '#4DFFFFFF' :
+            (this.recording ? Palette.WHITE : Palette.SIGNAL)).borderRadius(35)
+            .enabled(!this.greeting && !this.processing)
             .onClick(() => this.recording ? this.requestFinish() : this.start())
-          Text(this.processing ? '正在准备' : (this.recording ? '结束介绍' : '开始介绍'))
+          Text(this.greeting ? '评委正在说明' : (this.processing ? '正在准备' :
+            (this.recording ? '结束介绍' : '开始介绍')))
             .fontSize(13)
             .fontWeight(FontWeight.Bold)
             .fontColor(Palette.WHITE)
