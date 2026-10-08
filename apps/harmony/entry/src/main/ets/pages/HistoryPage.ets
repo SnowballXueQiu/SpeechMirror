@@ -115,8 +115,9 @@ struct HistoryPage {
         Button('‹').width(42).height(42).fontSize(28).fontColor(Palette.INK).backgroundColor(Color.Transparent)
           .onClick(() => router.back())
         Text('训练历史').fontSize(17).fontWeight(FontWeight.Bold).fontColor(Palette.INK).layoutWeight(1)
-        Button('↻').width(42).height(42).fontSize(22).fontColor(Palette.INK).backgroundColor(Color.Transparent)
-          .onClick(() => this.reload())
+        Stack({ alignContent: Alignment.Center }) {
+          Image($r('app.media.ic_refresh')).width(23).height(23)
+        }.width(42).height(42).onClick(() => this.reload())
       }.width('100%').height(56)
       if (this.loading) {
         LoadingProgress().width(30).height(30).color(Palette.BLUE).margin({ top: 100 })
