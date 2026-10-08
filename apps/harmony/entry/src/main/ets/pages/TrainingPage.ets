@@ -1,6 +1,7 @@
 import { router, window } from '@kit.ArkUI';
 import { vibrator } from '@kit.SensorServiceKit';
 import { apiClient } from '../services/ApiClient';
+import { SpeechOutput } from '../services/SpeechOutput';
 import { CameraStage } from '../ui/CameraStage';
 import { Palette } from '../ui/Palette';
 
@@ -22,18 +23,34 @@ struct TrainingPage {
   private timer: number = -1;
   private sessionId: string = '';
   private enteringJury: boolean = false;
+  private speech: SpeechOutput = new SpeechOutput();
 
   aboutToAppear(): void {
     this.setImmersive(true);
-    setTimeout(() => {
-      this.greeting = false;
-      this.start();
-    }, 4200);
+    this.playGreeting();
   }
 
   aboutToDisappear(): void {
     this.stopTimer();
+    this.speech.shutdown();
     if (!this.enteringJury) this.setImmersive(false);
+  }
+
+  private async playGreeting(): Promise<void> {
+    const played = await this.speech.speak(
+      '好的，请开始介绍你的项目。我会先完整听你介绍，介绍结束后正式开始答辩。',
+      () => {},
+      () => {
+        this.greeting = false;
+        this.start();
+      }
+    );
+    if (!played) {
+      setTimeout(() => {
+        this.greeting = false;
+        this.start();
+      }, 4200);
+    }
   }
 
   private async setImmersive(enabled: boolean): Promise<void> {

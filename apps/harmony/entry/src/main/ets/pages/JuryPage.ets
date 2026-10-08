@@ -1,6 +1,7 @@
 import { router, window } from '@kit.ArkUI';
 import { JuryAnswer, JuryEvaluation, JuryQuestion } from '../models/Models';
 import { apiClient } from '../services/ApiClient';
+import { SpeechOutput } from '../services/SpeechOutput';
 import { CameraStage } from '../ui/CameraStage';
 import { Palette } from '../ui/Palette';
 
@@ -21,6 +22,7 @@ struct JuryPage {
   @State showAnswer: boolean = false;
   @State showReview: boolean = false;
   @State voiceRecording: boolean = false;
+  @State speaking: boolean = false;
   @State pendingAdvance: boolean = false;
   @State lastEvaluation?: JuryEvaluation = undefined;
   private params: JuryParams = router.getParams() as JuryParams;
@@ -28,6 +30,7 @@ struct JuryPage {
   private pendingRequestId: string = '';
   private timer: number = -1;
   private timerRunning: boolean = false;
+  private speech: SpeechOutput = new SpeechOutput();
 
   aboutToAppear(): void {
     this.setImmersive(true);
@@ -36,6 +39,7 @@ struct JuryPage {
 
   aboutToDisappear(): void {
     this.pauseTimer();
+    this.speech.shutdown();
     this.setImmersive(false);
   }
 
@@ -56,7 +60,7 @@ struct JuryPage {
   }
 
   private resumeTimer(): void {
-    if (this.timerRunning || this.busy) return;
+    if (this.timerRunning || this.busy || this.speaking) return;
     this.timerRunning = true;
     this.timer = setInterval(() => this.elapsed += 1, 1000);
   }
@@ -77,6 +81,7 @@ struct JuryPage {
     if (this.retryAttempt > 0) return 'AI 服务暂时未完成请求，正在自动重试（' + String(this.retryAttempt) + '/5）';
     if (this.busy && this.questions.length === 0) return '评委正在阅读材料与现场陈述';
     if (this.busy) return '评委正在思考';
+    if (this.speaking) return '评委正在提问';
     if (this.voiceRecording) return '正在回答';
     return '请回答';
   }
@@ -143,12 +148,29 @@ struct JuryPage {
       this.error = String(reason);
     } finally {
       this.busy = false;
-      if (this.activePrompt.length > 0) this.resumeTimer();
+      if (this.activePrompt.length > 0) this.speakQuestion();
+    }
+  }
+
+  private async speakQuestion(): Promise<void> {
+    if (this.activePrompt.trim().length === 0 || this.busy) return;
+    this.pauseTimer();
+    const played = await this.speech.speak(
+      this.activePrompt,
+      (speaking: boolean) => this.speaking = speaking,
+      () => {
+        this.speaking = false;
+        this.resumeTimer();
+      }
+    );
+    if (!played) {
+      this.speaking = false;
+      this.resumeTimer();
     }
   }
 
   private openAnswerSheet(): void {
-    if (this.busy || this.activePrompt.length === 0) return;
+    if (this.busy || this.speaking || this.activePrompt.length === 0) return;
     this.voiceRecording = false;
     this.draftAnswer = this.answerText;
     this.showAnswer = true;
@@ -160,7 +182,7 @@ struct JuryPage {
   }
 
   private toggleVoice(): void {
-    if (this.busy || this.activePrompt.length === 0) return;
+    if (this.busy || this.speaking || this.activePrompt.length === 0) return;
     if (!this.voiceRecording) {
       this.voiceRecording = true;
       return;
@@ -197,7 +219,7 @@ struct JuryPage {
         this.parentAnswerId = answer.id;
         this.activePrompt = followUp;
         this.busy = false;
-        this.resumeTimer();
+        this.speakQuestion();
         return;
       }
       if (answer.evaluation.decision === 'end_defense') {
@@ -229,7 +251,7 @@ struct JuryPage {
       this.error = String(reason);
     } finally {
       this.busy = false;
-      this.resumeTimer();
+      if (this.error.length === 0) this.speakQuestion();
     }
   }
 
@@ -306,6 +328,7 @@ struct JuryPage {
           .height(36)
           .backgroundColor(Color.Transparent)
           .enabled(!this.busy && this.activePrompt.length > 0)
+          .onClick(() => this.speakQuestion())
       }.width('100%')
       if (this.activePrompt.length > 0) {
         Text(this.activePrompt)
@@ -342,7 +365,7 @@ struct JuryPage {
         .height(54)
         .backgroundColor('#4DFFFFFF')
         .borderRadius(27)
-        .enabled(!this.busy && !this.voiceRecording)
+        .enabled(!this.busy && !this.speaking && !this.voiceRecording)
         .onClick(() => this.openAnswerSheet())
       Button({ type: ButtonType.Circle }) {
         Image(this.voiceRecording ? $r('app.media.ic_stop') : $r('app.media.ic_mic_dark'))
@@ -353,7 +376,7 @@ struct JuryPage {
         .height(70)
         .backgroundColor(this.voiceRecording ? Palette.RED : Palette.SIGNAL)
         .borderRadius(35)
-        .enabled(!this.busy)
+        .enabled(!this.busy && !this.speaking)
         .onClick(() => this.toggleVoice())
       Button({ type: ButtonType.Circle }) {
         Image($r('app.media.ic_call_end')).width(28).height(28)
