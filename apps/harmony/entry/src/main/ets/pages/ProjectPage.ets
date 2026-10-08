@@ -15,6 +15,7 @@ struct ProjectPage {
   @State loading: boolean = true;
   @State uploading: boolean = false;
   @State deleting: boolean = false;
+  @State showMenu: boolean = false;
   @State showDelete: boolean = false;
   @State error: string = '';
   private projectId: string = (router.getParams() as ProjectParams).projectId;
@@ -100,7 +101,7 @@ struct ProjectPage {
             Image($r('app.media.ic_more')).width(23).height(23)
           }.width(42).height(42).borderRadius(21).backgroundColor(Palette.WHITE)
             .border({ width: 1, color: Palette.LINE }).margin({ left: 4, right: 8 })
-            .onClick(() => this.showDelete = true)
+            .onClick(() => this.showMenu = !this.showMenu)
         }.width('100%').height(54)
         if (this.loading && this.project === undefined) {
           Column({ space: 12 }) {
@@ -203,22 +204,45 @@ struct ProjectPage {
                   }, (document: DocumentItem) => document.id)
                 }.width('100%').border({ width: { top: 1, bottom: 1 }, color: Palette.LINE })
               }
-              Row() {
-                Column({ space: 4 }) {
-                  Text('训练记录').fontSize(17).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
-                  Text(String(this.sessions.length) + ' 次练习').fontSize(12).fontColor(Palette.MUTED)
-                }.alignItems(HorizontalAlign.Start)
-                Blank()
-                Button('查看历史  →').type(ButtonType.Normal).height(42).fontSize(13).fontColor(Palette.BLUE_DARK)
-                  .backgroundColor(Color.Transparent).onClick(() => router.pushUrl({
-                    url: 'pages/HistoryPage',
-                    params: { projectId: this.projectId, projectName: this.project?.name ?? '答辩项目' }
-                  }))
-              }.width('100%').padding({ top: 20, bottom: 20 }).margin({ top: 16 })
             }.alignItems(HorizontalAlign.Start).width('100%').padding({ left: 20, right: 20, bottom: 36 })
           }.layoutWeight(1).width('100%')
         }
       }.width('100%').height('100%').backgroundColor(Palette.PAPER)
+      if (this.showMenu) {
+        Column() {
+          Row() {
+            Blank().layoutWeight(1).onClick(() => this.showMenu = false)
+            Column() {
+              Row({ space: 14 }) {
+                Stack({ alignContent: Alignment.Center }) {
+                  Image($r('app.media.ic_edit')).width(21).height(21)
+                }.width(40).height(40).borderRadius(7).backgroundColor(Palette.PAPER)
+                Text('编辑项目').fontSize(15).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
+              }.width('100%').height(64).padding({ left: 14, right: 14 })
+                .onClick(() => {
+                  this.showMenu = false;
+                  router.pushUrl({
+                    url: 'pages/ProjectEditorPage',
+                    params: { projectJson: JSON.stringify(this.project) }
+                  });
+                })
+              Row({ space: 14 }) {
+                Stack({ alignContent: Alignment.Center }) {
+                  Image($r('app.media.ic_delete_red')).width(21).height(21)
+                }.width(40).height(40).borderRadius(7).backgroundColor(Palette.SOFT_RED)
+                Text('删除项目').fontSize(15).fontWeight(FontWeight.Bold).fontColor(Palette.RED)
+              }.width('100%').height(64).padding({ left: 14, right: 14 })
+                .onClick(() => {
+                  this.showMenu = false;
+                  this.showDelete = true;
+                })
+            }.width(206).backgroundColor(Palette.WHITE).borderRadius(12)
+              .border({ width: 1, color: Palette.LINE })
+              .shadow({ radius: 18, color: '#26000000', offsetX: 0, offsetY: 7 })
+          }.width('100%')
+          Blank().layoutWeight(1).onClick(() => this.showMenu = false)
+        }.width('100%').height('100%').padding({ top: 64, right: 20, left: 20 })
+      }
       if (this.showDelete) {
         Column() {
           Blank().layoutWeight(1).onClick(() => this.showDelete = false)
