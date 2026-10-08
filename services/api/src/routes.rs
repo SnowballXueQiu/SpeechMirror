@@ -1322,14 +1322,23 @@ fn fill_fallback_question_candidates_with_history(
         let Some(evidence) = evidence else { continue };
         let variant = (offset + index) % 2;
         let question = fallback_question(category, variant, &evidence);
-        if !candidate_is_novel(
+        let novel_across_project_history = candidate_is_novel(
             category,
             &question,
             std::slice::from_ref(&evidence),
             candidates,
             previous_questions,
             previous_evidence,
-        ) {
+        );
+        let novel_in_current_defense = candidate_is_novel(
+            category,
+            &question,
+            std::slice::from_ref(&evidence),
+            candidates,
+            &[],
+            &[],
+        );
+        if !novel_across_project_history && !novel_in_current_defense {
             continue;
         }
         candidates.push(QuestionCandidate {
@@ -2525,6 +2534,31 @@ mod route_tests {
                 .windows(2)
                 .all(|pair| !questions_are_near_duplicates(&pair[0].question, &pair[1].question))
         );
+    }
+
+    #[test]
+    fn fallback_questions_do_not_fail_when_project_history_exhausts_variants() {
+        let chunks = vec![question_test_chunk()];
+        let plan = vec!["背景与需求"];
+        let evidence = best_evidence_quote(&chunks, category_evidence_query("背景与需求"), 0)
+            .expect("test chunk should provide evidence");
+        let previous_questions = vec![
+            fallback_question("背景与需求", 0, &evidence),
+            fallback_question("背景与需求", 1, &evidence),
+        ];
+        let mut candidates = Vec::new();
+
+        fill_fallback_question_candidates_with_history(
+            &plan,
+            &chunks,
+            &mut candidates,
+            "repeated-project-session",
+            &previous_questions,
+            std::slice::from_ref(&evidence),
+        );
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].category, "背景与需求");
     }
 
     #[test]
