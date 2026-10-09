@@ -412,29 +412,31 @@ async fn qa_dimension(state: &AppState, session_id: &str) -> ApiResult<Dimension
     let mut completeness_scores = Vec::new();
     let mut evidence = Vec::new();
     for answer in &answers {
-        if let Some(score) = answer.evaluation_json.get("score").and_then(Value::as_i64) {
-            scores.push(score.clamp(0, 100) as i32);
+        if answer_is_scorable(answer) {
+            if let Some(score) = answer.evaluation_json.get("score").and_then(Value::as_i64) {
+                scores.push(score.clamp(0, 100) as i32);
+            }
+            collect_evaluation_score(
+                &answer.evaluation_json,
+                "expression_score",
+                &mut expression_scores,
+            );
+            collect_evaluation_score(
+                &answer.evaluation_json,
+                "adaptability_score",
+                &mut adaptability_scores,
+            );
+            collect_evaluation_score(
+                &answer.evaluation_json,
+                "familiarity_score",
+                &mut familiarity_scores,
+            );
+            collect_evaluation_score(
+                &answer.evaluation_json,
+                "completeness_score",
+                &mut completeness_scores,
+            );
         }
-        collect_evaluation_score(
-            &answer.evaluation_json,
-            "expression_score",
-            &mut expression_scores,
-        );
-        collect_evaluation_score(
-            &answer.evaluation_json,
-            "adaptability_score",
-            &mut adaptability_scores,
-        );
-        collect_evaluation_score(
-            &answer.evaluation_json,
-            "familiarity_score",
-            &mut familiarity_scores,
-        );
-        collect_evaluation_score(
-            &answer.evaluation_json,
-            "completeness_score",
-            &mut completeness_scores,
-        );
         if let Some(items) = answer
             .evaluation_json
             .get("evidence")
@@ -483,12 +485,27 @@ fn score_label(score: Option<i32>) -> String {
     score.map_or_else(|| "暂无数据".into(), |value| format!("{value}分"))
 }
 
+fn answer_is_scorable(answer: &jury_answer::Model) -> bool {
+    answer
+        .evaluation_json
+        .get("scorable")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
 fn defense_score_items(
     answers: &[jury_answer::Model],
     questions: &[jury_question::Model],
     content_score: i32,
     delivery_score: i32,
 ) -> Vec<DefenseScoreItem> {
+    let scorable_answer_count = answers
+        .iter()
+        .filter(|answer| answer_is_scorable(answer))
+        .count();
+    if scorable_answer_count == 0 {
+        return Vec::new();
+    }
     let categories = questions
         .iter()
         .map(|question| (question.id.as_str(), question.category.as_str()))
@@ -521,7 +538,7 @@ fn defense_score_items(
         score: ((normalized.clamp(0, 100) as f64 * maximum as f64 / 100.0).round() as i32)
             .clamp(0, maximum),
         max_score: maximum,
-        summary: if answers.is_empty() {
+        summary: if scorable_answer_count == 0 {
             "本次没有完成有效问答，无法证明这一项能力。".into()
         } else if normalized >= 80 {
             format!("回答能够具体说明{focus}，并与项目材料保持较好一致。")
@@ -573,6 +590,7 @@ fn defense_score_items(
 fn average_bounded_evaluation_score(answers: &[jury_answer::Model], key: &str) -> Option<i32> {
     let scores = answers
         .iter()
+        .filter(|answer| answer_is_scorable(answer))
         .filter_map(|answer| {
             let raw = answer.evaluation_json.get(key)?.as_i64()?;
             let calibrated = answer
@@ -592,6 +610,7 @@ fn average_answer_scores(
 ) -> Option<i32> {
     let scores = answers
         .iter()
+        .filter(|answer| answer_is_scorable(answer))
         .filter(|answer| {
             category_filter.is_none_or(|(categories, accepted)| {
                 categories
@@ -850,7 +869,17 @@ pub async fn generate_report(state: &AppState, session_id: &str) -> ApiResult<re
         evidence: Vec::new(),
     };
     let defense_scores = defense_score_items(&answers, &questions, content_score, delivery_score);
-    let overall_score = Some(defense_scores.iter().map(|item| item.score).sum());
+    let overall_score = if defense_scores.is_empty() {
+        weighted_overall_score([
+            (Some(content_score), 0.30),
+            (has_presentation.then_some(delivery_score), 0.20),
+            (has_presentation.then_some(timing_score), 0.10),
+            ((!metrics.is_empty()).then_some(visual_score), 0.15),
+            (qa.score, 0.25),
+        ])
+    } else {
+        Some(defense_scores.iter().map(|item| item.score).sum())
+    };
 
     let payload = ReportPayload {
         session_id: session.id.clone(),

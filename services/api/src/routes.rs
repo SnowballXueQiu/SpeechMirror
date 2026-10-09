@@ -1664,7 +1664,7 @@ async fn submit_answer(
     let elapsed_seconds = body.elapsed_seconds.unwrap_or_default().max(0);
     let target_seconds = session.target_seconds.max(1);
     let prompt = format!(
-        "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n\n本场已完成主问题数：{}\n本场回答轮数：{}\n当前问题已追问深度：{}\n答辩者累计回答用时：{}秒\n目标答辩时长：{}秒\n\n历史问答：\n{}\n\n项目材料：\n{}\n\n只返回JSON，字段为score(0-100整数)、score_band、expression_score(0-100整数)、adaptability_score(0-100整数)、familiarity_score(0-100整数)、completeness_score(0-100整数)、relevance、accuracy、question_target、expected_points数组、covered_points数组、missing_points数组、unsupported_claims数组、evidence数组、suggestions数组、decision、follow_up。decision只能是follow_up、next_question或end_defense。先判断是否回答本轮问题，再核对材料事实。完全跑题、胡编或没有覆盖要点时不超过30分；明确表示不知道或不会时不超过15分且decision必须为next_question；回答没有材料依据时不超过45分；只有明确回答问题、引用具体方案或数据并说明边界时才能超过70分。evidence每项必须含chunk_id和对应材料中的连续完整quote。suggestions至少给出3条具体改进，只供最终报告使用。需要继续核查当前回答的一个关键漏洞时才选择follow_up，并给出一个承接回答的简短具体问题；否则换题。相关核心维度已充分覆盖且继续提问价值很低时选择end_defense。",
+        "原始问题：{}\n{}本轮问题：{}\n本轮回答：{}\n\n本场已完成主问题数：{}\n本场回答轮数：{}\n当前问题已追问深度：{}\n答辩者累计回答用时：{}秒\n目标答辩时长：{}秒\n\n历史问答：\n{}\n\n项目材料：\n{}\n\n只返回JSON，字段为score(0-100整数)、score_band、relevance_score(0-100整数)、accuracy_score(0-100整数)、expression_score(0-100整数)、adaptability_score(0-100整数)、familiarity_score(0-100整数)、completeness_score(0-100整数)、relevance、accuracy、question_target、expected_points数组、covered_points数组、missing_points数组、unsupported_claims数组、evidence数组、suggestions数组、decision、follow_up。decision只能是follow_up、next_question或end_defense。评分必须基于本轮问题和回答，允许答辩者用自己的话准确转述材料，不要求逐字复述。分数锚点：0-19为不知道、无有效内容或完全胡乱回答；20-39为仅有少量相关词语、主要结论无依据；40-59为回答了部分问题但较笼统，缺少关键实现、数据或边界；60-74为基本正确且大体相关，但存在明显遗漏；75-89为回答清楚、具体、与材料一致，仅有次要不足；90-100为直接、完整、准确地回答问题，同时说明具体方案、依据或验证与适用边界。不得为人工评委预留固定分数，满足标准时可以给到100分；100分应当少见但不能被人为封顶。完全跑题或胡编通常不超过25分；明确表示不知道或不会时不超过15分且decision必须为next_question；只有明确回答问题并且事实可靠时才能超过70分。expected_points列出本题真正需要覆盖的2至5个要点，covered_points只记录回答中实际覆盖的要点，不能为凑分拆分同一句话。unsupported_claims只记录回答中确实出现且无法由材料或合理技术解释支持的说法，单纯遗漏不能算作胡编。evidence每项必须含chunk_id和对应材料中的连续完整quote。suggestions至少给出3条具体改进，只供最终报告使用。需要继续核查当前回答的一个关键漏洞时才选择follow_up，并给出一个承接回答的简短具体问题；否则换题。相关核心维度已充分覆盖且继续提问价值很低时选择end_defense。",
         question.question,
         previous_turn,
         asked_question,
@@ -1734,7 +1734,7 @@ async fn submit_answer(
         .and_then(Value::as_i64)
         .ok_or_else(|| ApiError::Internal("AI answer evaluation did not contain a score".into()))?
         .clamp(0, 100);
-    let score = calibrate_answer_score(
+    let calibration = calibrate_answer_score(
         raw_score,
         &asked_question,
         &body.answer_text,
@@ -1744,7 +1744,33 @@ async fn submit_answer(
     let evaluation_object = evaluation
         .as_object_mut()
         .ok_or_else(|| ApiError::Internal("AI answer evaluation is malformed".into()))?;
-    evaluation_object.insert("score".into(), json!(score));
+    evaluation_object.insert("raw_model_score".into(), json!(raw_score));
+    evaluation_object.insert("score".into(), json!(calibration.score));
+    evaluation_object.insert(
+        "score_band".into(),
+        json!(answer_score_band(calibration.score)),
+    );
+    evaluation_object.insert("score_version".into(), json!("answer-v2"));
+    evaluation_object.insert(
+        "score_calibration".into(),
+        json!({
+            "composite_score": calibration.composite_score,
+            "upper_bound": calibration.upper_bound,
+            "coverage_percent": calibration.coverage_percent,
+            "unsupported_penalty": calibration.unsupported_penalty,
+            "lexical_overlap": calibration.lexical_overlap,
+            "question_overlap": calibration.question_overlap
+        }),
+    );
+    evaluation_object.insert(
+        "scorable".into(),
+        json!(
+            evaluation_object
+                .get("evaluation_source")
+                .and_then(Value::as_str)
+                != Some("material_recovery")
+        ),
+    );
     normalize_defense_decision(
         &mut evaluation,
         &body.answer_text,
@@ -1870,7 +1896,8 @@ fn fallback_answer_evaluation(
         ],
         "decision": "next_question",
         "follow_up": Value::Null,
-        "evaluation_source": "material_recovery"
+        "evaluation_source": "material_recovery",
+        "scorable": false
     })
 }
 
@@ -1926,21 +1953,30 @@ fn enrich_answer_feedback(evaluation: &mut Value, asked_question: &str, evidence
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AnswerScoreCalibration {
+    score: i64,
+    composite_score: i64,
+    upper_bound: i64,
+    coverage_percent: Option<i64>,
+    unsupported_penalty: i64,
+    lexical_overlap: usize,
+    question_overlap: usize,
+}
+
 fn calibrate_answer_score(
     raw_score: i64,
     asked_question: &str,
     answer_text: &str,
     evidence: &[EvidenceRef],
     evaluation: &Value,
-) -> i64 {
-    if answer_admits_unknown(answer_text) {
-        return raw_score.min(12);
-    }
+) -> AnswerScoreCalibration {
+    let raw_score = raw_score.clamp(0, 100);
     let answer_length = answer_text
         .chars()
         .filter(|character| !character.is_whitespace())
         .count();
-    let overlap = material_overlap_count(answer_text, evidence);
+    let lexical_overlap = material_overlap_count(answer_text, evidence);
     let question_overlap = pair_overlap_count(answer_text, asked_question);
     let expected = evaluation
         .get("expected_points")
@@ -1954,22 +1990,123 @@ fn calibrate_answer_score(
         .get("unsupported_claims")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
-    let upper_bound = if answer_length < 15 || (question_overlap == 0 && overlap == 0) {
-        22
-    } else if unsupported > 0 && overlap == 0 {
-        32
-    } else if overlap == 0 {
-        40
-    } else if covered == 0 || overlap < 2 {
-        50
-    } else if expected > 0 && covered < expected {
-        68
-    } else if overlap < 4 {
-        78
-    } else {
-        90
+    let coverage_percent =
+        (expected > 0).then(|| ((covered.min(expected) * 100) / expected) as i64);
+
+    if answer_admits_unknown(answer_text) {
+        return AnswerScoreCalibration {
+            score: raw_score.min(15),
+            composite_score: raw_score,
+            upper_bound: 15,
+            coverage_percent,
+            unsupported_penalty: 0,
+            lexical_overlap,
+            question_overlap,
+        };
+    }
+
+    let relevance = evaluation_numeric_score(evaluation, "relevance_score").unwrap_or_else(|| {
+        if question_overlap > 0 {
+            raw_score.min(70)
+        } else {
+            raw_score.min(40)
+        }
+    });
+    let accuracy = evaluation_numeric_score(evaluation, "accuracy_score").unwrap_or_else(|| {
+        if unsupported == 0 && lexical_overlap > 0 {
+            raw_score.min(80)
+        } else if unsupported == 0 {
+            raw_score.min(60)
+        } else {
+            raw_score.min(35)
+        }
+    });
+    let completeness =
+        evaluation_numeric_score(evaluation, "completeness_score").unwrap_or(raw_score);
+    let familiarity =
+        evaluation_numeric_score(evaluation, "familiarity_score").unwrap_or(raw_score);
+    let adaptability =
+        evaluation_numeric_score(evaluation, "adaptability_score").unwrap_or(raw_score);
+    let expression = evaluation_numeric_score(evaluation, "expression_score").unwrap_or(raw_score);
+    let composite_score = ((raw_score * 20
+        + relevance * 20
+        + accuracy * 25
+        + completeness * 15
+        + familiarity * 10
+        + adaptability * 5
+        + expression * 5
+        + 50)
+        / 100)
+        .clamp(0, 100);
+
+    let coverage_penalty = match coverage_percent {
+        Some(0) => 20,
+        Some(percent) if percent < 50 => 12,
+        Some(percent) if percent < 100 => 5,
+        _ => 0,
     };
-    raw_score.min(upper_bound)
+    let unsupported_penalty = (unsupported as i64 * 5).min(15);
+    let lexical_penalty = if lexical_overlap == 0 && question_overlap == 0 && relevance < 70 {
+        8
+    } else {
+        0
+    };
+    let mut upper_bound = if answer_length < 8 {
+        20
+    } else if answer_length < 15 {
+        40
+    } else if relevance < 25 {
+        25
+    } else if unsupported > 0 && accuracy < 45 {
+        35
+    } else if coverage_percent == Some(0) {
+        50
+    } else if coverage_percent.is_some_and(|percent| percent < 50) {
+        65
+    } else if coverage_percent.is_some_and(|percent| percent < 100) {
+        82
+    } else {
+        100
+    };
+
+    let qualifies_for_excellent = answer_length >= 50
+        && coverage_percent == Some(100)
+        && unsupported == 0
+        && relevance >= 88
+        && accuracy >= 88
+        && completeness >= 85;
+    if upper_bound == 100 && !qualifies_for_excellent {
+        upper_bound = 89;
+    }
+    let score = (composite_score - coverage_penalty - unsupported_penalty - lexical_penalty)
+        .clamp(0, upper_bound);
+    AnswerScoreCalibration {
+        score,
+        composite_score,
+        upper_bound,
+        coverage_percent,
+        unsupported_penalty,
+        lexical_overlap,
+        question_overlap,
+    }
+}
+
+fn evaluation_numeric_score(evaluation: &Value, key: &str) -> Option<i64> {
+    evaluation
+        .get(key)?
+        .as_i64()
+        .map(|score| score.clamp(0, 100))
+}
+
+fn answer_score_band(score: i64) -> &'static str {
+    match score {
+        0..=19 => "严重不足",
+        20..=39 => "明显不足",
+        40..=59 => "有限回答",
+        60..=74 => "基本合格",
+        75..=89 => "良好",
+        _ => "优秀",
+    }
 }
 
 fn material_overlap_count(answer_text: &str, evidence: &[EvidenceRef]) -> usize {
@@ -2007,7 +2144,7 @@ fn answer_admits_unknown(answer: &str) -> bool {
         .chars()
         .filter(|character| !character.is_whitespace() && !character.is_ascii_punctuation())
         .collect::<String>();
-    compact.chars().count() <= 60
+    compact.chars().count() <= 28
         && [
             "不知道",
             "不清楚",
@@ -2664,32 +2801,132 @@ mod route_tests {
     }
 
     #[test]
-    fn answer_score_is_capped_without_material_overlap() {
+    fn answer_score_distinguishes_bad_mixed_and_excellent_answers() {
         let evidence = vec![EvidenceRef {
             chunk_id: "chunk-1".into(),
             quote: "系统采用端云协同架构".into(),
         }];
 
-        assert_eq!(
-            calibrate_answer_score(
-                96,
-                "项目如何实现？",
-                "我觉得这个项目特别好，大家都会喜欢。",
-                &evidence,
-                &json!({"expected_points":["实现"],"covered_points":[],"unsupported_claims":["无法定位"]}),
-            ),
-            32
+        let bad = calibrate_answer_score(
+            96,
+            "项目如何实现？",
+            "我觉得这个项目特别好，大家都会喜欢。",
+            &evidence,
+            &json!({
+                "relevance_score": 15,
+                "accuracy_score": 10,
+                "expression_score": 55,
+                "adaptability_score": 15,
+                "familiarity_score": 20,
+                "completeness_score": 10,
+                "expected_points":["实现","验证"],
+                "covered_points":[],
+                "unsupported_claims":["无法定位"]
+            }),
         );
-        assert_eq!(
-            calibrate_answer_score(
-                96,
-                "端云协同架构如何验证？",
-                "系统采用端云协同架构，并通过材料中的流程和测试结果支撑这一方案，同时说明了适用边界和后续验证计划。",
-                &evidence,
-                &json!({"expected_points":["架构"],"covered_points":["架构"],"unsupported_claims":[]}),
-            ),
-            90
+        assert!(bad.score <= 25, "bad answer scored {}", bad.score);
+
+        let mixed = calibrate_answer_score(
+            68,
+            "端云协同架构如何验证？",
+            "我们在三端使用了相同接口，也做过基本测试，但具体的性能数据我现在记不清楚。",
+            &evidence,
+            &json!({
+                "relevance_score": 70,
+                "accuracy_score": 72,
+                "expression_score": 65,
+                "adaptability_score": 60,
+                "familiarity_score": 68,
+                "completeness_score": 55,
+                "expected_points":["统一接口","测试方法","性能数据","适用边界"],
+                "covered_points":["统一接口","测试方法"],
+                "unsupported_claims":[]
+            }),
         );
+        assert!(
+            (55..=70).contains(&mixed.score),
+            "mixed answer scored {}",
+            mixed.score
+        );
+
+        let excellent = calibrate_answer_score(
+            96,
+            "端云协同架构如何验证？",
+            "我们使用同一份材料和目标时长在三端回归，分别记录接口结果、失败重试和报告字段；当前已经完成构建与模拟器流程，尚未把鸿蒙真机性能写成已验证结论。",
+            &evidence,
+            &json!({
+                "relevance_score": 94,
+                "accuracy_score": 93,
+                "expression_score": 90,
+                "adaptability_score": 88,
+                "familiarity_score": 92,
+                "completeness_score": 91,
+                "expected_points":["测试输入","验证指标","结果边界"],
+                "covered_points":["测试输入","验证指标","结果边界"],
+                "unsupported_claims":[]
+            }),
+        );
+        assert!(
+            (90..=100).contains(&excellent.score),
+            "excellent answer scored {}",
+            excellent.score
+        );
+    }
+
+    #[test]
+    fn semantic_paraphrase_is_not_rejected_for_missing_literal_overlap() {
+        let evidence = vec![EvidenceRef {
+            chunk_id: "chunk-1".into(),
+            quote: "AlphaBeta GammaDelta EpsilonZeta".into(),
+        }];
+        let result = calibrate_answer_score(
+            94,
+            "怎样划分移动侧和云侧的职责？",
+            "手机只计算能够立即得到的结构化观察量，复杂的资料召回、回答核对和总结都交给服务器；这样既减少持续上传，也让三个客户端共享一致的业务判断。",
+            &evidence,
+            &json!({
+                "relevance_score": 95,
+                "accuracy_score": 92,
+                "expression_score": 90,
+                "adaptability_score": 88,
+                "familiarity_score": 93,
+                "completeness_score": 90,
+                "expected_points":["终端职责","服务端职责","选型理由"],
+                "covered_points":["终端职责","服务端职责","选型理由"],
+                "unsupported_claims":[]
+            }),
+        );
+
+        assert_eq!(result.lexical_overlap, 0);
+        assert!(result.score >= 90, "paraphrase scored {}", result.score);
+    }
+
+    #[test]
+    fn partial_answer_with_an_honest_gap_is_not_treated_as_total_unknown() {
+        assert!(!answer_admits_unknown(
+            "我们在三端使用了相同接口，也做过基本测试，但具体性能数据我现在记不清楚。"
+        ));
+        assert!(answer_admits_unknown(
+            "这个问题我不知道，也没有做过相关测试。"
+        ));
+    }
+
+    #[test]
+    fn admitting_unknown_is_honest_but_still_low_scoring() {
+        let result = calibrate_answer_score(
+            82,
+            "向量模型为什么这样选择？",
+            "这个问题我不知道。",
+            &[],
+            &json!({
+                "expected_points":["选型依据"],
+                "covered_points":[],
+                "unsupported_claims":[]
+            }),
+        );
+
+        assert_eq!(result.score, 15);
+        assert_eq!(result.upper_bound, 15);
     }
 
     #[test]
