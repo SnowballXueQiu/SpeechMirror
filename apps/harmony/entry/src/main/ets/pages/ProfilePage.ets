@@ -1,4 +1,7 @@
 import { router } from '@kit.ArkUI';
+import { picker } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { ActivityDay, ActivitySummary, UserProfile, UserProfileUpdate } from '../models/Models';
 import { apiClient } from '../services/ApiClient';
 import { Palette } from '../ui/Palette';
@@ -16,6 +19,9 @@ struct ProfilePage {
   @State error: string = '';
   @State cacheMessage: string = '';
   @State showLogout: boolean = false;
+  @State showAvatarActions: boolean = false;
+  @State avatarBusy: boolean = false;
+  @State avatar?: image.PixelMap = undefined;
   private activityScroller: Scroller = new Scroller();
 
   onPageShow(): void { this.reload(); }
@@ -26,6 +32,7 @@ struct ProfilePage {
       const results = await Promise.all([apiClient.getProfile(), apiClient.getActivity()]);
       this.profile = results[0] as UserProfile;
       this.activity = results[1] as ActivitySummary;
+      await this.loadAvatar();
       this.error = '';
       setTimeout((): void => {
         this.activityScroller.scrollEdge(Edge.End);
@@ -34,6 +41,104 @@ struct ProfilePage {
       this.error = String(reason);
     } finally {
       this.loading = false;
+    }
+  }
+
+  private async loadAvatar(): Promise<void> {
+    if (!(this.profile?.has_avatar ?? false)) {
+      this.avatar = undefined;
+      return;
+    }
+    try {
+      const source = image.createImageSource(await apiClient.getAvatarBytes());
+      try {
+        this.avatar = await source.createPixelMap({ desiredSize: { width: 144, height: 144 } });
+      } finally {
+        await source.release();
+      }
+    } catch (_) {
+      this.avatar = undefined;
+    }
+  }
+
+  private async prepareAvatar(uri: string): Promise<ArrayBuffer> {
+    const source = image.createImageSource(uri);
+    try {
+      const info = await source.getImageInfo();
+      const maxSide = Math.max(info.size.width, info.size.height);
+      const scale = maxSide > 1024 ? 1024 / maxSide : 1;
+      const width = Math.max(1, Math.round(info.size.width * scale));
+      const height = Math.max(1, Math.round(info.size.height * scale));
+      const pixelMap = await source.createPixelMap({ desiredSize: { width, height } });
+      try {
+        const packer = image.createImagePacker();
+        try {
+          return await packer.packToData(pixelMap, {
+            format: 'image/jpeg',
+            quality: 80,
+            bufferSize: 2 * 1024 * 1024
+          });
+        } finally {
+          await packer.release();
+        }
+      } finally {
+        await pixelMap.release();
+      }
+    } finally {
+      await source.release();
+    }
+  }
+
+  private async uploadAvatarUri(uri: string): Promise<void> {
+    if (this.avatarBusy) return;
+    this.avatarBusy = true;
+    this.error = '';
+    try {
+      await apiClient.uploadAvatar(await this.prepareAvatar(uri));
+      this.profile = await apiClient.getProfile();
+      await this.loadAvatar();
+    } catch (reason) {
+      this.error = `头像更新失败：${String(reason)}`;
+    } finally {
+      this.avatarBusy = false;
+    }
+  }
+
+  private async chooseAvatarFromGallery(): Promise<void> {
+    this.showAvatarActions = false;
+    try {
+      const options = new photoAccessHelper.PhotoSelectOptions();
+      options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      options.maxSelectNumber = 1;
+      const result = await new photoAccessHelper.PhotoViewPicker().select(options);
+      if (result.photoUris.length > 0) await this.uploadAvatarUri(result.photoUris[0]);
+    } catch (_) {}
+  }
+
+  private async chooseAvatarFromFiles(): Promise<void> {
+    this.showAvatarActions = false;
+    try {
+      const options = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = 1;
+      options.fileSuffixFilters = ['.png', '.jpg', '.jpeg'];
+      const selected = await new picker.DocumentViewPicker().select(options);
+      if (selected.length > 0) await this.uploadAvatarUri(selected[0]);
+    } catch (_) {}
+  }
+
+  private async removeAvatar(): Promise<void> {
+    if (this.avatarBusy) return;
+    this.showAvatarActions = false;
+    this.avatarBusy = true;
+    this.error = '';
+    try {
+      await apiClient.deleteAvatar();
+      this.profile = await apiClient.getProfile();
+      this.avatar = undefined;
+    } catch (reason) {
+      this.error = `头像移除失败：${String(reason)}`;
+    } finally {
+      this.avatarBusy = false;
     }
   }
 
@@ -163,13 +268,22 @@ struct ProfilePage {
             Column() {
               Row() {
                 Stack({ alignContent: Alignment.Center }) {
-                  Text((this.profile?.username ?? 'U').slice(0, 1).toUpperCase())
-                    .fontSize(26).fontWeight(FontWeight.Bold).fontColor(Palette.SIGNAL)
+                  if (this.avatar !== undefined) {
+                    Image(this.avatar).width(72).height(72).objectFit(ImageFit.Cover).borderRadius(36)
+                  } else {
+                    Text((this.profile?.username ?? 'U').slice(0, 1).toUpperCase())
+                      .fontSize(26).fontWeight(FontWeight.Bold).fontColor(Palette.SIGNAL)
+                  }
                   Stack({ alignContent: Alignment.Center }) {
-                    Image($r('app.media.ic_edit_white')).width(14).height(14)
+                    if (this.avatarBusy) {
+                      LoadingProgress().width(14).height(14).color(Palette.WHITE)
+                    } else {
+                      Image($r('app.media.ic_edit_white')).width(14).height(14)
+                    }
                   }.width(26).height(26).borderRadius(13).backgroundColor(Palette.BLUE)
                     .border({ width: 2, color: Palette.PAPER }).position({ x: 49, y: 49 })
                 }.width(72).height(72).borderRadius(36).backgroundColor(Palette.INK)
+                  .onClick(() => this.showAvatarActions = true)
                 Column({ space: 5 }) {
                   Text(this.profile?.username ?? '用户').fontSize(24).fontWeight(FontWeight.Bold)
                     .fontColor(Palette.INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -267,6 +381,35 @@ struct ProfilePage {
             }.width('100%').margin({ top: 8 })
           }.padding(22).width('100%').backgroundColor(Palette.WHITE)
             .borderRadius({ topLeft: 22, topRight: 22 })
+        }.width('100%').height('100%').backgroundColor('#70111412')
+      }
+      if (this.showAvatarActions) {
+        Column() {
+          Blank().layoutWeight(1).onClick(() => this.showAvatarActions = false)
+          Column({ space: 12 }) {
+            Row() {
+              Column({ space: 4 }) {
+                Text('个人头像').fontSize(20).fontWeight(FontWeight.Bold).fontColor(Palette.INK)
+                Text('支持 PNG、JPG 或 JPEG 图片').fontSize(13).fontColor(Palette.MUTED)
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+              Button('×').width(38).height(38).fontSize(24).fontColor(Palette.MUTED)
+                .backgroundColor(Palette.PAPER_STRONG).borderRadius(19)
+                .onClick(() => this.showAvatarActions = false)
+            }.width('100%')
+            Button(this.profile?.has_avatar ? '从图库更换' : '从图库选择')
+              .width('100%').height(50).fontSize(15).fontWeight(FontWeight.Bold)
+              .fontColor(Palette.WHITE).backgroundColor(Palette.BLUE).borderRadius(7)
+              .onClick(() => this.chooseAvatarFromGallery())
+            Button('从文件选择').width('100%').height(50).fontSize(15).fontWeight(FontWeight.Bold)
+              .fontColor(Palette.INK).backgroundColor(Palette.PAPER_STRONG).borderRadius(7)
+              .onClick(() => this.chooseAvatarFromFiles())
+            if (this.profile?.has_avatar ?? false) {
+              Button('移除当前头像').width('100%').height(50).fontSize(15).fontWeight(FontWeight.Bold)
+                .fontColor(Palette.RED).backgroundColor(Palette.SOFT_RED).borderRadius(7)
+                .onClick(() => this.removeAvatar())
+            }
+          }.padding({ left: 22, right: 22, top: 22, bottom: 30 }).width('100%')
+            .backgroundColor(Palette.WHITE).borderRadius({ topLeft: 22, topRight: 22 })
         }.width('100%').height('100%').backgroundColor('#70111412')
       }
     }.width('100%').height('100%')

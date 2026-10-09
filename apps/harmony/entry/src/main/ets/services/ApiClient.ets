@@ -169,6 +169,65 @@ class ApiClient {
     }
   }
 
+  private async performBinary(path: string): Promise<ArrayBuffer> {
+    const client = http.createHttp();
+    const headers: Record<string, string> = {};
+    if (this.accessToken.length > 0) headers['Authorization'] = `Bearer ${this.accessToken}`;
+    try {
+      const response = await client.request(`${this.baseUrl()}${path}`, {
+        method: http.RequestMethod.GET,
+        header: headers,
+        expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        connectTimeout: 15000,
+        readTimeout: 30000
+      });
+      if (response.responseCode < 200 || response.responseCode >= 300) {
+        const result = typeof response.result === 'string' ? response.result : '';
+        throw new ApiError(this.messageFor(response.responseCode, result), response.responseCode);
+      }
+      return response.result as ArrayBuffer;
+    } finally {
+      client.destroy();
+    }
+  }
+
+  private async requestBinary(path: string): Promise<ArrayBuffer> {
+    await this.restoreSession();
+    try {
+      return await this.performBinary(path);
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.statusCode === 401 && await this.refresh()) {
+        return this.performBinary(path);
+      }
+      if (reason instanceof Error) throw reason;
+      throw new ApiError(`${reason}`);
+    }
+  }
+
+  private async performAvatarUpload(data: ArrayBuffer): Promise<void> {
+    const client = http.createHttp();
+    try {
+      const response = await client.request(`${this.baseUrl()}/me/avatar`, {
+        method: http.RequestMethod.POST,
+        header: { 'Authorization': `Bearer ${this.accessToken}` },
+        multiFormDataList: [{
+          name: 'file',
+          contentType: 'image/jpeg',
+          remoteFileName: 'avatar.jpg',
+          data
+        }],
+        connectTimeout: 15000,
+        readTimeout: 30000
+      });
+      const result = response.result as string;
+      if (response.responseCode < 200 || response.responseCode >= 300) {
+        throw new ApiError(this.messageFor(response.responseCode, result), response.responseCode);
+      }
+    } finally {
+      client.destroy();
+    }
+  }
+
   private localDate(): string {
     const date = new Date();
     const month = `${date.getMonth() + 1}`.padStart(2, '0');
@@ -196,6 +255,23 @@ class ApiClient {
   getProfile(): Promise<UserProfile> { return this.request<UserProfile>(http.RequestMethod.GET, '/me'); }
   updateProfile(update: UserProfileUpdate): Promise<UserProfile> {
     return this.request<UserProfile>(http.RequestMethod.PUT, '/me', update);
+  }
+  getAvatarBytes(): Promise<ArrayBuffer> { return this.requestBinary('/me/avatar'); }
+  async uploadAvatar(data: ArrayBuffer): Promise<void> {
+    await this.restoreSession();
+    try {
+      await this.performAvatarUpload(data);
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.statusCode === 401 && await this.refresh()) {
+        await this.performAvatarUpload(data);
+        return;
+      }
+      if (reason instanceof Error) throw reason;
+      throw new ApiError(`${reason}`);
+    }
+  }
+  deleteAvatar(): Promise<object> {
+    return this.request<object>(http.RequestMethod.DELETE, '/me/avatar');
   }
   recordActivity(): Promise<object> {
     const body: LocalDateRequest = { local_date: this.localDate() };
