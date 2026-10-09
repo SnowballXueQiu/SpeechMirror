@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../api_client.dart';
 import '../auth_controller.dart';
@@ -181,9 +182,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             FilledButton.icon(
-              onPressed: () => Navigator.pop(sheetContext, 'choose'),
+              onPressed: () => Navigator.pop(sheetContext, 'gallery'),
               icon: const Icon(Icons.photo_library_outlined),
-              label: Text(profile.hasAvatar ? '更换头像' : '选择头像'),
+              label: Text(profile.hasAvatar ? '从图库更换' : '从图库选择'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(sheetContext, 'file'),
+              icon: const Icon(Icons.folder_open_outlined),
+              label: const Text('从文件选择'),
             ),
             if (profile.hasAvatar) ...[
               const SizedBox(height: 8),
@@ -206,12 +213,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (action == 'delete') {
         await api.deleteAvatar();
       } else {
-        final result = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: const ['png', 'jpg', 'jpeg'],
-          allowMultiple: false,
-        );
-        final path = result?.files.single.path;
+        final path = action == 'gallery'
+            ? (await ImagePicker().pickImage(
+                source: ImageSource.gallery,
+                maxWidth: 1024,
+                maxHeight: 1024,
+                imageQuality: 80,
+              ))?.path
+            : (await FilePicker.platform.pickFiles(
+                type: FileType.custom,
+                allowedExtensions: const ['png', 'jpg', 'jpeg'],
+                allowMultiple: false,
+              ))?.files.single.path;
         if (path == null) return;
         await api.uploadAvatar(path);
       }

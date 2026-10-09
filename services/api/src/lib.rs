@@ -689,6 +689,54 @@ mod tests {
         assert_eq!(corrected["extracted_text"], "已校正的答辩材料文本");
     }
 
+    #[tokio::test]
+    async fn material_upload_bypasses_the_shared_body_limit() {
+        let temp = tempdir().unwrap();
+        let router = app(Config::test(temp.path().to_owned())).await.unwrap();
+        let registered = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/auth/register",
+                json!({"username":"large_material_owner","password":"correct-horse"}),
+                None,
+            ))
+            .await
+            .unwrap();
+        let registered: Value =
+            serde_json::from_slice(&registered.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let token = registered["access_token"].as_str().unwrap();
+        let project = router
+            .clone()
+            .oneshot(json_request(
+                "/api/v1/projects",
+                json!({"name":"大文件材料测试","defense_duration_seconds":300}),
+                Some(token),
+            ))
+            .await
+            .unwrap();
+        let project: Value =
+            serde_json::from_slice(&project.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let project_id = project["id"].as_str().unwrap();
+
+        // This exceeds the router's shared 60 MiB cap. Invalid PDF content
+        // should reach document validation and return 400 rather than being
+        // rejected by Axum with 413 before the upload handler runs.
+        let large_invalid_pdf = vec![b'x'; 61 * 1024 * 1024];
+        let response = router
+            .oneshot(multipart_request(
+                &format!("/api/v1/projects/{project_id}/documents"),
+                "large.pdf",
+                "application/pdf",
+                &large_invalid_pdf,
+                token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
     fn json_request(uri: &str, body: Value, token: Option<&str>) -> Request<Body> {
         json_request_with_method(Method::POST, uri, body, token)
     }

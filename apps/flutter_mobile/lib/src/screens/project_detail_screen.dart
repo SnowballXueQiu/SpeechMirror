@@ -275,10 +275,6 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
     );
     if (result == null || result.files.isEmpty) return;
     final file = result.files.single;
-    if (file.size > 25 * 1024 * 1024) {
-      if (mounted) showError(context, const ApiException('材料大小不能超过 25 MiB'));
-      return;
-    }
     setState(() => _uploading = true);
     try {
       await ref

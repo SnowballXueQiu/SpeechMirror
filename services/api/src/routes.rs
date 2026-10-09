@@ -50,7 +50,12 @@ pub fn api_router(state: AppState) -> Router {
         )
         .route(
             "/projects/{project_id}/documents",
-            get(list_documents).post(upload_document),
+            get(list_documents)
+                .post(upload_document)
+                // PPTX files can legitimately exceed 100 MiB. Keep the
+                // default limit for every other API route and disable it only
+                // for project materials.
+                .layer(DefaultBodyLimit::disable()),
         )
         .route("/documents/{document_id}", get(get_document))
         .route("/documents/{document_id}/text", put(correct_document_text))
@@ -2235,7 +2240,6 @@ fn safe_filename(input: &str) -> String {
     }
 }
 
-const MAX_DOCUMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 30 * 1024 * 1024;
 
 fn validate_document_upload(
@@ -2245,11 +2249,6 @@ fn validate_document_upload(
 ) -> ApiResult<&'static str> {
     if data.is_empty() {
         return Err(ApiError::BadRequest("uploaded document is empty".into()));
-    }
-    if data.len() > MAX_DOCUMENT_BYTES {
-        return Err(ApiError::BadRequest(
-            "document exceeds the 25 MiB upload limit".into(),
-        ));
     }
     let extension = PathBuf::from(filename)
         .extension()
@@ -2317,20 +2316,17 @@ mod route_tests {
     }
 
     #[test]
-    fn validates_extension_media_type_content_and_size() {
+    fn validates_extension_media_type_and_content_without_a_document_size_cap() {
         assert_eq!(
             validate_document_upload("notes.md", "text/markdown", b"# SpeechMirror").unwrap(),
             "text/markdown"
         );
         assert!(validate_document_upload("fake.pdf", "application/pdf", b"plain text").is_err());
         assert!(validate_document_upload("image.png", "image/jpeg", b"\x89PNG\r\n\x1a\n").is_err());
-        assert!(
-            validate_document_upload(
-                "large.txt",
-                "text/plain",
-                &vec![b'a'; MAX_DOCUMENT_BYTES + 1],
-            )
-            .is_err()
+        assert_eq!(
+            validate_document_upload("large.txt", "text/plain", &vec![b'a'; 26 * 1024 * 1024])
+                .unwrap(),
+            "text/plain"
         );
     }
 

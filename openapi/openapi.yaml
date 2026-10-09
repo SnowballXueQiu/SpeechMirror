@@ -112,7 +112,7 @@ paths:
         '200': {description: 材料列表, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Document'}}}}}
     post:
       operationId: uploadDocument
-      description: 支持 PDF、PPTX、DOCX、UTF-8 TXT/Markdown、PNG 和 JPEG，扩展名、媒体类型与文件特征必须一致，单文件不超过 25 MiB。
+      description: 支持 PDF、PPTX、DOCX、UTF-8 TXT/Markdown、PNG 和 JPEG。扩展名、媒体类型与文件特征必须一致；服务端不对材料设置应用层单文件大小上限，具体可用空间取决于设备和服务端存储。
       requestBody: {$ref: '#/components/requestBodies/DocumentUpload'}
       responses:
         '200': {description: 已持久化并排队处理, content: {application/json: {schema: {$ref: '#/components/schemas/Document'}}}}
